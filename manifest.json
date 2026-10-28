@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.tonciz.agents-budget",
+  "name": "Agents Budget",
+  "version": "1.0.0",
+  "author": "Tonči Žižić",
+  "license": "MIT",
+  "description": "The Omarchy Agents panel plus a Claude daily budget: a split 5h/week pill in the bar and a running daily allowance with carry-over in the panel.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Agents Budget",
+    "description": "Claude 5h and weekly usage as one pill in the bar (countdown to the 5h reset, yellow and red warnings), and a panel that leads with what is left of today's budget.",
+    "category": "AI",
+    "aliases": [
+      "agents",
+      "model-usage",
+      "claude-budget"
+    ],
+    "allowMultiple": false,
+    "defaults": {
+      "providers": {
+        "claude": {
+          "enabled": true
+        },
+        "codex": {
+          "enabled": true
+        },
+        "fireworks": {
+          "enabled": true
+        }
+      },
+      "refreshIntervalSec": 60,
+      "syncMode": "Off",
+      "syncDir": "",
+      "syncFileName": "",
+      "syncDeviceId": ""
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 30,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 60
+      },
+      {
+        "key": "syncMode",
+        "type": "enum",
+        "label": "Synced aggregation",
+        "options": [
+          "Off",
+          "On"
+        ],
+        "defaultValue": "Off",
+        "description": "When On, write this machine's local usage snapshot and merge snapshots from other machines."
+      },
+      {
+        "key": "syncDir",
+        "type": "path",
+        "label": "Sync folder",
+        "defaultValue": "",
+        "description": "A folder synced by Syncthing, Dropbox, rsync, etc."
+      },
+      {
+        "key": "syncFileName",
+        "type": "string",
+        "label": "Snapshot file name",
+        "defaultValue": "",
+        "description": "Optional. Defaults to <hostname>.json. Use a different file name on each machine, such as laptop.json or desktop.json."
+      },
+      {
+        "key": "syncDeviceId",
+        "type": "string",
+        "label": "Device id",
+        "defaultValue": "",
+        "description": "Optional stable device name used inside synced aggregate snapshots."
+      }
+    ],
+    "defaultSection": "left"
+  }
+}
