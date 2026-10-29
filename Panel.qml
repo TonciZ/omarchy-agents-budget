@@ -617,49 +617,45 @@ Panel {
         PillHalf { window: root.weeklyWindow; label: "week" }
       }
 
-      // The battery: full at the start of the day, emptying right to left.
+      // The battery: full at the start of the day, emptying from the left
+      // like a phone battery, with the number in the middle.
       Item {
         id: battery
         anchors.fill: parent
         visible: root.showBattery
-        readonly property string label: root.batteryOver ? "over" : "today"
+        readonly property string label: root.batteryOver ? "over " + root.batteryText : root.batteryText
 
         Rectangle {
           anchors.fill: parent
           color: root.track
         }
 
-        PillText {
-          text: battery.label
-          color: root.batteryOver ? root.urgent : button.foreground
-          height: pill.height
-          font.pixelSize: Style.font.caption
-        }
-        PillText {
-          text: root.batteryText
-          color: root.batteryOver ? root.urgent : button.foreground
-          height: pill.height
-          font.pixelSize: Style.font.caption
-          alignRight: true
-        }
+        BatteryText { color: root.batteryOver ? root.urgent : button.foreground }
 
         Item {
+          id: batteryFill
           height: parent.height
           width: parent.width * root.batteryFraction
+          x: parent.width - width
           clip: true
 
           Behavior on width {
             NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
           }
 
-          Rectangle {
+          // Drawn at the pill's own origin so the inverted text lines up.
+          Item {
+            x: -batteryFill.x
             width: battery.width
             height: battery.height
-            color: button.foreground
-          }
 
-          PillText { text: battery.label; color: root.barBackground; height: pill.height; font.pixelSize: Style.font.caption }
-          PillText { text: root.batteryText; color: root.barBackground; height: pill.height; font.pixelSize: Style.font.caption; alignRight: true }
+            Rectangle {
+              anchors.fill: parent
+              color: button.foreground
+            }
+
+            BatteryText { color: root.barBackground }
+          }
         }
       }
 
@@ -714,6 +710,14 @@ Panel {
       PillText { text: half.label; color: root.barBackground }
       PillText { text: half.percentText; color: root.barBackground; alignRight: true }
     }
+  }
+
+  component BatteryText: Text {
+    textFormat: Text.PlainText
+    text: battery.label
+    anchors.centerIn: parent
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
   }
 
   component PillText: Text {
@@ -975,20 +979,24 @@ Panel {
 
             Item { width: 1; height: Style.space(2) }
 
-            ViewSwitch {
+            Toggle {
               width: parent.width
               label: "Left today in the bar"
-              hint: "middle click"
+              description: "One battery pill instead of 5h and week. Also on middle click."
               checked: root.batteryView
-              onToggled: root.setView(!root.batteryView, root.batteryScaled)
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onClicked: root.setView(!root.batteryView, root.batteryScaled)
             }
 
-            ViewSwitch {
+            Toggle {
               width: parent.width
               label: "Count today from 100"
-              hint: checked ? "100 to 0" : "actual %"
+              description: "Off shows the actual percent left. On counts today down from 100 to 0."
               checked: root.batteryScaled
-              onToggled: root.setView(root.batteryView, !root.batteryScaled)
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onClicked: root.setView(root.batteryView, !root.batteryScaled)
             }
           }
 
@@ -1233,54 +1241,6 @@ Panel {
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
-    }
-  }
-
-  // A labelled on/off row; the whole row takes the click.
-  component ViewSwitch: Item {
-    id: viewSwitch
-    property string label: ""
-    property string hint: ""
-    property bool checked: false
-    signal toggled()
-
-    implicitHeight: switchControl.implicitHeight
-
-    Text {
-      id: switchLabel
-      textFormat: Text.PlainText
-      text: viewSwitch.label
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.body
-      anchors.left: parent.left
-      anchors.verticalCenter: parent.verticalCenter
-    }
-
-    Text {
-      textFormat: Text.PlainText
-      text: viewSwitch.hint
-      color: root.dim
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-      anchors.left: switchLabel.right
-      anchors.leftMargin: Style.space(6)
-      anchors.baseline: switchLabel.baseline
-    }
-
-    ToggleSwitch {
-      id: switchControl
-      anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      checked: viewSwitch.checked
-      interactive: false
-      foreground: root.foreground
-    }
-
-    MouseArea {
-      anchors.fill: parent
-      cursorShape: Qt.PointingHandCursor
-      onClicked: viewSwitch.toggled()
     }
   }
 

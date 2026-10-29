@@ -55,11 +55,12 @@ button falls back to the plain icon.
 
 Switch on **Left today in the bar** in the panel's budget section (or middle
 click the pill) and the pill becomes one battery for today's budget. It is
-full when the day starts and empties right to left as you use it.
+full when the day starts and empties from the left as you use it, like a
+phone battery, with the number in the middle.
 
 ```
-╭ today  ██████████░░░░░  7.9% ╮
-╰──────────────────────────────╯
+╭░░░░░░░░░░ 7.9% ███████████╮
+╰───────────────────────────╯
 ```
 
 **Count today from 100** picks the number on it. Off, it is the actual weekly
