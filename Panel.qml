@@ -535,7 +535,7 @@ Panel {
     text: "󱚣"
     labelVisible: !root.showGlance
     fontSize: Style.bar.iconFont
-    fixedWidth: root.showGlance ? pill.width + scaledHorizontalMargin * 2 + Style.space(12) : (vertical ? -1 : Style.bar.iconSlot)
+    fixedWidth: root.showGlance ? pill.width + Style.space(10) : (vertical ? -1 : Style.bar.iconSlot)
     fixedHeight: vertical ? Style.bar.iconSlot : -1
     active: root.alarming
     onPressed: function(buttonCode) {
