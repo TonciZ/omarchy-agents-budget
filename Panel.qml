@@ -983,7 +983,7 @@ Panel {
             Toggle {
               width: parent.width
               label: "Left today in the bar"
-              description: "One battery pill instead of 5h and week. Also on middle click."
+              description: "One battery pill instead of 5h and week. Activate on middle click."
               checked: root.batteryView
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -994,6 +994,9 @@ Panel {
             Toggle {
               width: parent.width
               label: "Count today from 100"
+              // Only means something with the battery on.
+              enabled: root.batteryView
+              opacity: enabled ? 1 : 0.4
               description: "Off shows the actual percent left. On counts today down from 100 to 0."
               checked: root.batteryScaled
               foreground: root.foreground
