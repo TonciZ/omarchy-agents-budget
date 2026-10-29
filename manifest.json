@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tonciz.agents-budget",
   "name": "Agents Budget",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "Tonči Žižić",
   "license": "MIT",
   "description": "The Omarchy Agents panel plus a Claude daily budget: a split 5h/week pill in the bar and a running daily allowance with carry-over in the panel.",

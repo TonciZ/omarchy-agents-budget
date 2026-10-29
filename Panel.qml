@@ -717,7 +717,8 @@ Panel {
     text: battery.label
     anchors.centerIn: parent
     font.family: root.fontFamily
-    font.pixelSize: Style.font.caption
+    font.pixelSize: Style.font.heading
+    font.bold: true
   }
 
   component PillText: Text {
@@ -986,6 +987,7 @@ Panel {
               checked: root.batteryView
               foreground: root.foreground
               fontFamily: root.fontFamily
+              rounded: false
               onClicked: root.setView(!root.batteryView, root.batteryScaled)
             }
 
@@ -996,6 +998,7 @@ Panel {
               checked: root.batteryScaled
               foreground: root.foreground
               fontFamily: root.fontFamily
+              rounded: false
               onClicked: root.setView(root.batteryView, !root.batteryScaled)
             }
           }
