@@ -51,6 +51,23 @@ urgent color, so the pill follows theme changes.
 Without Claude limits (signed out, no record yet) or on a vertical bar the
 button falls back to the plain icon.
 
+### Battery view
+
+Switch on **Left today in the bar** in the panel's budget section (or middle
+click the pill) and the pill becomes one battery for today's budget. It is
+full when the day starts and empties right to left as you use it.
+
+```
+╭ today  ██████████░░░░░  7.9% ╮
+╰──────────────────────────────╯
+```
+
+**Count today from 100** picks the number on it. Off, it is the actual weekly
+percent left for today (14% budget, half used: `7%`). On, today's budget is
+split into 100 parts and it counts down from `100` to `0` (same day: `50`).
+Past the budget it reads `over` in red. Both switches are kept in
+`~/.local/state/omarchy/agents/view.json`.
+
 ## The daily budget
 
 Each calendar day gets a seventh of the weekly limit, and whatever you do not
@@ -96,8 +113,8 @@ omarchy bar set io.github.tonciz.agents-budget refreshIntervalSec 30 --json
 
 ## Interactions
 
-- Bar: left click opens the panel, right click launches an agent, middle
-  click switches subscription.
+- Bar: left click opens the panel, right click launches your default agent
+  (`omarchy default agent claude`), middle click switches the battery view.
 - Panel: `h`/`l` switch subscription, `j`/`k` scroll, `r` or Enter refresh,
   Esc closes.
 - IPC: `omarchy-shell io.github.tonciz.agents-budget <open|close|toggle|refresh|next>`.

@@ -519,6 +519,45 @@ Panel {
   readonly property var weeklyWindow: glanceWindow("Weekly")
   readonly property bool showGlance: !button.vertical && (!!sessionWindow || !!weeklyWindow)
 
+  // Two remembered switches in the budget section (middle click flips the
+  // first): the pill shows what is left today as one battery instead of the
+  // 5h/week split, and that battery reads either the actual weekly percent
+  // left or today's budget scaled to 100.
+  readonly property string viewPath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/agents/view.json"
+  property bool batteryView: false
+  property bool batteryScaled: false
+
+  FileView {
+    id: viewFile
+    path: root.viewPath
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var parsed = JSON.parse(text())
+        root.batteryView = !!parsed.battery
+        root.batteryScaled = !!parsed.scaled
+      } catch (e) {}
+    }
+  }
+
+  function setView(battery, scaled) {
+    batteryView = battery
+    batteryScaled = scaled
+    viewFile.setText(JSON.stringify({ battery: battery, scaled: scaled }, null, 2) + "\n")
+  }
+
+  readonly property bool showBattery: batteryView && !!budgetToday
+  readonly property bool batteryOver: !!budgetToday && budgetToday.over
+  readonly property real batteryLeft: budgetToday ? budgetToday.cap - budgetToday.total : 0
+  readonly property real batteryFraction: budgetToday && budgetToday.budget > 0
+    ? clamp(batteryLeft / budgetToday.budget, 0, 1) : 0
+  readonly property string batteryText: !budgetToday ? ""
+    : batteryOver ? budgetPercent(-batteryLeft)
+    : batteryScaled ? String(Math.round(batteryFraction * 100))
+    : budgetPercent(batteryLeft)
+
   // A window that resets while nothing refreshes should read 0%, not its
   // stale figure, so the clock ticks whenever the bar shows meters.
   Timer {
@@ -540,7 +579,7 @@ Panel {
     active: root.alarming
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.launchAgent()
-      else if (buttonCode === Qt.MiddleButton) root.selectProvider(root.providerIndex + 1)
+      else if (buttonCode === Qt.MiddleButton) root.setView(!root.batteryView, root.batteryScaled)
       else root.toggle()
     }
 
@@ -563,6 +602,7 @@ Panel {
 
       Column {
         anchors.fill: parent
+        visible: !root.showBattery
 
         PillHalf {
           window: root.sessionWindow
@@ -575,6 +615,52 @@ Panel {
           color: root.barBackground
         }
         PillHalf { window: root.weeklyWindow; label: "week" }
+      }
+
+      // The battery: full at the start of the day, emptying right to left.
+      Item {
+        id: battery
+        anchors.fill: parent
+        visible: root.showBattery
+        readonly property string label: root.batteryOver ? "over" : "today"
+
+        Rectangle {
+          anchors.fill: parent
+          color: root.track
+        }
+
+        PillText {
+          text: battery.label
+          color: root.batteryOver ? root.urgent : button.foreground
+          height: pill.height
+          font.pixelSize: Style.font.caption
+        }
+        PillText {
+          text: root.batteryText
+          color: root.batteryOver ? root.urgent : button.foreground
+          height: pill.height
+          font.pixelSize: Style.font.caption
+          alignRight: true
+        }
+
+        Item {
+          height: parent.height
+          width: parent.width * root.batteryFraction
+          clip: true
+
+          Behavior on width {
+            NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+          }
+
+          Rectangle {
+            width: battery.width
+            height: battery.height
+            color: button.foreground
+          }
+
+          PillText { text: battery.label; color: root.barBackground; height: pill.height; font.pixelSize: Style.font.caption }
+          PillText { text: root.batteryText; color: root.barBackground; height: pill.height; font.pixelSize: Style.font.caption; alignRight: true }
+        }
       }
 
       Rectangle {
@@ -886,6 +972,24 @@ Panel {
               width: parent.width
               days: root.budgetDays
             }
+
+            Item { width: 1; height: Style.space(2) }
+
+            ViewSwitch {
+              width: parent.width
+              label: "Left today in the bar"
+              hint: "middle click"
+              checked: root.batteryView
+              onToggled: root.setView(!root.batteryView, root.batteryScaled)
+            }
+
+            ViewSwitch {
+              width: parent.width
+              label: "Count today from 100"
+              hint: checked ? "100 to 0" : "actual %"
+              checked: root.batteryScaled
+              onToggled: root.setView(root.batteryView, !root.batteryScaled)
+            }
           }
 
           // ---------- Balance / limits ----------
@@ -1129,6 +1233,54 @@ Panel {
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
+    }
+  }
+
+  // A labelled on/off row; the whole row takes the click.
+  component ViewSwitch: Item {
+    id: viewSwitch
+    property string label: ""
+    property string hint: ""
+    property bool checked: false
+    signal toggled()
+
+    implicitHeight: switchControl.implicitHeight
+
+    Text {
+      id: switchLabel
+      textFormat: Text.PlainText
+      text: viewSwitch.label
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+    }
+
+    Text {
+      textFormat: Text.PlainText
+      text: viewSwitch.hint
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      anchors.left: switchLabel.right
+      anchors.leftMargin: Style.space(6)
+      anchors.baseline: switchLabel.baseline
+    }
+
+    ToggleSwitch {
+      id: switchControl
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      checked: viewSwitch.checked
+      interactive: false
+      foreground: root.foreground
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: viewSwitch.toggled()
     }
   }
 
