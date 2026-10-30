@@ -8,6 +8,8 @@ The Omarchy **Agents** bar widget with two additions for Claude Code users:
   limit below, each with its percentage inside. The session half is labelled
   with the time until it resets. The text inverts where the fill covers it,
   like a phone battery.
+- **A battery view with 5h momentum.** Today's budget as one battery, with
+  a strip underneath that shows how fast the 5h session is burning.
 - **A daily budget in the panel.** Your weekly limit split into a running
   daily allowance, so you can pace a week of work instead of finding out on
   day five that it is gone.
@@ -68,6 +70,36 @@ percent left for today (14% budget, half used: `7%`). On, today's budget is
 split into 100 parts and it counts down from `100` to `0` (same day: `50`).
 Past the budget it reads `over` in red. Both switches are kept in
 `~/.local/state/omarchy/agents/view.json`.
+
+### 5h momentum strip
+
+In the battery view a thin strip along the bottom of the pill shows the
+5-hour session, so you can see how fast you are burning it without opening
+the panel. The fill is the session percent used, and the end of the fill
+tells you the pace of the last 15 minutes against the speed that would land
+exactly on 100% at the reset:
+
+```
+╭░░░░░░░░░░░░ 62 █████████████╮
+╰▀▀▀▀▀▀▀▀▀▀▀▀▀▀›››►──────────╯
+```
+
+| End of the fill | Pace vs what lasts until the reset | Color |
+|---|---|---|
+| `›››` point | 2x or more | red |
+| `››` point | 1.4x to 2x | yellow |
+| `›` point | 1.1x to 1.4x | normal |
+| flat, with a tick | 0.8x to 1.1x (on pace) | normal |
+| `‹` / `‹‹` / `‹‹‹` notch | under 0.8x / 0.5x / 0.2x (idle reads `‹‹‹`) | normal |
+
+The chevrons are cut out of the fill, and the whole line takes their color,
+or the 5h limit's own yellow/red at 70/80% if that is louder. When you are
+on pace the line ends flat and a small gap marks how much of the 5 hours has
+gone by: fill past the gap means you are using it faster than it lasts.
+
+The pace needs about 5 minutes of readings first, and they are kept in
+memory only, so the chevrons stay away for a few minutes after the shell
+restarts. With no active session the strip is hidden.
 
 ## The daily budget
 

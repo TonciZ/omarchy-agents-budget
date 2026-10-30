@@ -558,6 +558,53 @@ Panel {
     : batteryScaled ? String(Math.round(batteryFraction * 100))
     : budgetPercent(batteryLeft)
 
+  // The battery's 5h strip: a line along the bottom filled to the session
+  // percent, with a tick at how far through the 5 hours the clock is. Fill
+  // past the tick means the session is going faster than it lasts.
+  readonly property real sessionSpanMs: 5 * 3600 * 1000
+  readonly property bool showSessionStrip: showBattery && !!sessionWindow && sessionWindow.resetAt !== ""
+  readonly property real sessionElapsed: {
+    var ms = resetMsFor(sessionWindow)
+    return ms > 0 ? clamp(1 - ms / sessionSpanMs, 0, 1) : 0
+  }
+
+  // Chevrons on the strip: how fast the 5h percent rose over the last 15
+  // minutes, against the rate that would land exactly on 100% at the reset.
+  // Pointing right when faster (red at twice it, yellow from 1.4x), left when
+  // slower, none within 0.8-1.1x. Samples live in memory only; a drop in the
+  // percent is a new window and starts over.
+  property var sessionSamples: []
+  readonly property real burnSpanMs: 15 * 60 * 1000
+
+  onSessionWindowChanged: {
+    var w = sessionWindow
+    if (!w || w.resetAt === "") { sessionSamples = []; return }
+    var list = sessionSamples
+    var last = list.length > 0 ? list[list.length - 1] : null
+    if (last && w.percent < last.p) list = []
+    else if (last && w.percent === last.p && nowMs - last.t < 20000) return
+    list = list.filter(function(s) { return nowMs - s.t <= burnSpanMs })
+    list.push({ t: nowMs, p: w.percent })
+    sessionSamples = list
+  }
+
+  readonly property int burnLevel: {
+    var list = sessionSamples
+    if (list.length < 2) return 0
+    var first = list[0], last = list[list.length - 1]
+    // Under five minutes of history one whole-percent step reads as a sprint.
+    if (last.t - first.t < 5 * 60 * 1000) return 0
+    var rate = Math.max(0, last.p - first.p) / (last.t - first.t)
+    var left = resetMsFor(sessionWindow)
+    if (left <= 0 || last.p >= 1) return rate > 0 ? 3 : 0
+    var ratio = rate / ((1 - last.p) / left)
+    return ratio >= 2 ? 3 : ratio >= 1.4 ? 2 : ratio >= 1.1 ? 1
+      : ratio >= 0.8 ? 0 : ratio >= 0.5 ? -1 : ratio >= 0.2 ? -2 : -3
+  }
+  // The strip takes whichever is louder: the burn rate or the 5h limit level.
+  readonly property int stripLevel: Math.max(limitLevel(sessionWindow), burnLevel >= 3 ? 2 : burnLevel === 2 ? 1 : 0)
+  readonly property color stripColor: stripLevel === 2 ? urgent : stripLevel === 1 ? warning : button.foreground
+
   // A window that resets while nothing refreshes should read 0%, not its
   // stale figure, so the clock ticks whenever the bar shows meters.
   Timer {
@@ -618,10 +665,12 @@ Panel {
       }
 
       // The battery: full at the start of the day, emptying from the left
-      // like a phone battery, with the number in the middle.
+      // like a phone battery, with the number in the middle. The 5h strip
+      // takes the bottom edge when a session is running.
       Item {
         id: battery
-        anchors.fill: parent
+        width: parent.width
+        height: parent.height - (root.showSessionStrip ? sessionStrip.height + 1 : 0)
         visible: root.showBattery
         readonly property string label: root.batteryOver ? "over " + root.batteryText : root.batteryText
 
@@ -656,6 +705,80 @@ Panel {
 
             BatteryText { color: root.barBackground }
           }
+        }
+      }
+
+      Rectangle {
+        id: sessionStrip
+        visible: root.showSessionStrip
+        anchors.bottom: parent.bottom
+        width: parent.width
+        height: Style.space(6)
+        color: root.track
+
+        // The fill ends in a point for faster than it lasts, a notch for
+        // slower, flat on pace, with the chevrons cut out behind the end,
+        // parallel to it. The end alone merges into the track, so it does
+        // not count as one. A short fill is drawn
+        // long enough to hold them, clear of the rounded left end.
+        Canvas {
+          id: sessionFill
+          anchors.fill: parent
+          readonly property int count: Math.abs(root.burnLevel)
+          readonly property real depth: height * 0.45
+          readonly property real step: height * 0.8
+          property real head: width * root.clamp(root.sessionWindow ? root.sessionWindow.percent : 0, 0, 1)
+
+          Behavior on head {
+            NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+          }
+
+          onHeadChanged: requestPaint()
+          onWidthChanged: requestPaint()
+          Connections {
+            target: root
+            function onBurnLevelChanged() { sessionFill.requestPaint() }
+            function onStripColorChanged() { sessionFill.requestPaint() }
+            function onBarBackgroundChanged() { sessionFill.requestPaint() }
+          }
+
+          onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var h = height, half = h / 2, d = depth
+            var dir = root.burnLevel > 0 ? 1 : root.burnLevel < 0 ? -1 : 0
+            var end = dir === 0 ? sessionFill.head : Math.max(sessionFill.head, Style.space(7) + d + count * step)
+            if (end <= 0) return
+
+            ctx.fillStyle = root.stripColor
+            ctx.beginPath()
+            ctx.moveTo(0, 0)
+            if (dir > 0) { ctx.lineTo(end - d, 0); ctx.lineTo(end, half); ctx.lineTo(end - d, h) }
+            else if (dir < 0) { ctx.lineTo(end, 0); ctx.lineTo(end - d, half); ctx.lineTo(end, h) }
+            else { ctx.lineTo(end, 0); ctx.lineTo(end, h) }
+            ctx.lineTo(0, h)
+            ctx.closePath()
+            ctx.fill()
+
+            ctx.strokeStyle = root.barBackground
+            ctx.lineWidth = 1.5
+            for (var i = 1; i <= count; i++) {
+              var o = end - i * step
+              ctx.beginPath()
+              if (dir > 0) { ctx.moveTo(o - d, 0); ctx.lineTo(o, half); ctx.lineTo(o - d, h) }
+              else { ctx.moveTo(o, 0); ctx.lineTo(o - d, half); ctx.lineTo(o, h) }
+              ctx.stroke()
+            }
+          }
+        }
+
+        // Only on pace: the chevrons already say which side of it you are.
+        Rectangle {
+          visible: root.burnLevel === 0
+          x: Math.round(parent.width * root.sessionElapsed) - 1
+          width: 2
+          height: parent.height
+          color: root.barBackground
         }
       }
 
