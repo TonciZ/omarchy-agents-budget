@@ -101,6 +101,54 @@ The pace needs about 5 minutes of readings first, and they are kept in
 memory only, so the chevrons stay away for a few minutes after the shell
 restarts. With no active session the strip is hidden.
 
+## Pill views
+
+Every look the bar pill can have, captured from a live bar.
+
+![Split view](screenshots/pill-split.png)
+
+**Split view** (default). 5h session on top, labelled with the time to its
+reset, and the week below. Each half fills left to right and turns yellow,
+then red, as it gets close to its limit (here the 5h is at 69%).
+
+![Battery view, percent](screenshots/pill-battery-percent.png)
+
+**Battery view, actual percent.** Middle click the pill. One battery for
+today's budget, showing how much of the weekly limit is left for today
+(6.1%). The strip underneath is the 5h session. On pace it ends flat, and
+the small gap marks how much of the 5 hours has gone by.
+
+![Battery view, counting from 100](screenshots/pill-battery-100.png)
+
+**Battery view, counting from 100.** Same battery with **Count today from
+100** on: today's budget split into 100 parts, counting down to 0.
+
+![Burning at 2x or more](screenshots/pill-fast3.png)
+
+**`›››` Burning at 2x or more.** The last 15 minutes used the 5h session at
+least twice as fast as what lasts until its reset. The whole line turns red.
+
+![Burning at 1.4x to 2x](screenshots/pill-fast2.png)
+
+**`››` Burning at 1.4x to 2x.** Heading for the 5h limit before it resets.
+The line turns yellow.
+
+![Burning at 1.1x to 1.4x](screenshots/pill-fast1.png)
+
+**`›` Slightly fast, 1.1x to 1.4x.** Normally the line keeps its usual
+color. It is yellow here only because this session had already reached 70%,
+and the limit warning wins over a calm pace.
+
+![Slower than the limit](screenshots/pill-slow1.png)
+
+**`‹` Slower, under 0.8x.** You have room to spare. Same 70% warning color
+as above.
+
+![Barely using it](screenshots/pill-slow3.png)
+
+**`‹‹‹` Barely using it, under 0.2x.** This is also what an idle session
+looks like. (`‹‹` sits between, under 0.5x.)
+
 ## The daily budget
 
 Each calendar day gets a seventh of the weekly limit, and whatever you do not
