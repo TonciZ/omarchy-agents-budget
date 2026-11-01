@@ -168,12 +168,13 @@ Panel {
   // ---------------------------------------------------------------- budget
   //
   // A running daily allowance against the weekly window: a seventh of the week
-  // per day, with anything unused carried forward. Days run midnight to
-  // midnight. The weekly figure at each day's start lives in budget.json so
-  // the graph can show what each day used.
+  // per day, with anything unused carried forward. Days run from the weekly
+  // reset's local time of day to the same time the next day, so the week is
+  // exactly seven days and nothing about the reset is hardcoded: it comes from
+  // the weekly window's resetAt on every refresh. The weekly figure at each
+  // day's start lives in budget.json so the graph can show what each day used.
 
   readonly property string budgetPath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/agents/budget.json"
-  readonly property real dayMs: 24 * 3600 * 1000
   property var budgetState: ({ reset: "", days: {} })
   property bool budgetLoaded: false
 
@@ -204,32 +205,58 @@ Panel {
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")
   }
 
-  function midnightOf(ms) { var d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime() }
-  function nextMidnight(ms) { var d = new Date(ms); d.setHours(24, 0, 0, 0); return d.getTime() }
+  // The eight boundaries of the week's seven days, oldest first, ending at the
+  // reset. Stepping back a calendar day at a time keeps every boundary on the
+  // reset's local clock time, so a DST change gives one 23h or 25h day.
+  function budgetBounds(resetMs) {
+    var out = []
+    for (var i = 7; i >= 0; i--) {
+      var d = new Date(resetMs)
+      d.setDate(d.getDate() - i)
+      out.push(d.getTime())
+    }
+    return out
+  }
+
+  // Which of the seven days ms falls in, clamped to the week.
+  function budgetIndex(bounds, ms) {
+    for (var i = 0; i < 7; i++)
+      if (ms < bounds[i + 1]) return i
+    return 6
+  }
+
+  // A day is named and stored after the date its middle falls on, which is
+  // the date it mostly covers: Sat 21:00 to Sun 21:00 is Sunday.
+  function budgetKey(bounds, index) { return dateKey((bounds[index] + bounds[index + 1]) / 2) }
 
   function recordBudget() {
     var w = root.weeklyWindow
     if (!budgetLoaded || !w || w.resetAt === "") return
     var reset = new Date(w.resetAt).getTime()
     if (!isFinite(reset)) return
-    var windowStart = reset - 7 * dayMs
+    var bounds = budgetBounds(reset)
+    var index = budgetIndex(bounds, root.nowMs)
     // The reset time wobbles a little between fetches; a jump of more than
-    // an hour is a new window, and the old days no longer count.
+    // an hour is a new window, and the old days no longer count. A refill
+    // that leaves the reset where it is only lowers the percent, which the
+    // Math.min below takes as today's new start.
     var fresh = !budgetState.reset || Math.abs(new Date(budgetState.reset).getTime() - reset) > 3600000
     var days = {}
     if (!fresh) {
-      for (var k in budgetState.days)
-        if (k >= dateKey(windowStart)) days[k] = budgetState.days[k]
+      for (var i = 0; i < 7; i++) {
+        var k = budgetKey(bounds, i)
+        if (budgetState.days[k]) days[k] = budgetState.days[k]
+      }
     }
-    var key = dateKey(root.nowMs)
+    var key = budgetKey(bounds, index)
     var day = days[key]
     if (!day) {
-      // Today starts where the last recorded day left off, or at zero when
-      // the window itself began today.
+      // Today starts where the last recorded day left off, or at zero on the
+      // week's first day.
       var previous = ""
       for (var k2 in days)
         if (k2 < key && k2 > previous) previous = k2
-      var start = previous !== "" ? days[previous].last : (windowStart >= midnightOf(root.nowMs) ? 0 : w.percent)
+      var start = previous !== "" ? days[previous].last : (index === 0 ? 0 : w.percent)
       day = { start: Math.min(start, w.percent), last: w.percent }
     } else if (!fresh && day.last === w.percent) {
       return
@@ -241,10 +268,9 @@ Panel {
     budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
   }
 
-  // Each calendar day from the one the window opened on gets a seventh of the
-  // week, and whatever is not used carries forward in full: by the end of day
-  // i (0-based) up to (i + 1) / 7 may be used. The window spans eight calendar
-  // days, so the last one, the reset day, only has what was saved.
+  // Each of the seven days gets a seventh of the week, and whatever is not
+  // used carries forward in full: by the end of day i (0-based) up to
+  // (i + 1) / 7 may be used.
   function budgetCap(index) { return Math.min(1, (index + 1) / 7) }
 
   readonly property var budgetDays: {
@@ -252,16 +278,15 @@ Panel {
     if (!w || w.resetAt === "") return []
     var reset = new Date(w.resetAt).getTime()
     if (!isFinite(reset)) return []
-    var windowStart = reset - 7 * dayMs
+    var bounds = budgetBounds(reset)
     var stored = budgetState.days || {}
-    var todayKey = dateKey(root.nowMs)
+    var todayIndex = budgetIndex(bounds, root.nowMs)
     var out = []
-    var index = 0
-    for (var begin = midnightOf(windowStart); begin < reset; begin = nextMidnight(begin), index++) {
-      var key = dateKey(begin)
+    for (var index = 0; index < 7; index++) {
+      var key = budgetKey(bounds, index)
       var cap = budgetCap(index)
-      var row = { key: key, label: dayName(key), today: key === todayKey, future: key > todayKey,
-                  cap: cap, budget: -1, used: -1, over: false }
+      var row = { key: key, label: dayName(key), today: index === todayIndex, future: index > todayIndex,
+                  cap: cap, budget: -1, used: -1, over: false, endMs: bounds[index + 1] }
       var entry = stored[key]
       if (row.future) {
         // What the day has if every day before it ends exactly on budget.
@@ -802,7 +827,7 @@ Panel {
     property var window: null
     property string label: ""
     readonly property real percent: window ? window.percent : 0
-    readonly property string percentText: window ? Math.round(window.percent * 100) + "%" : ""
+    readonly property string percentText: window ? Math.round(window.percent * 100) + "%" : "—"
 
     width: pill.width
     height: root.pillHalfHeight
@@ -1094,6 +1119,22 @@ Panel {
               fillColor: budgetSection.over ? root.urgent : root.foreground
             }
 
+            // The day ends at the weekly reset's clock time, not midnight.
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              text: {
+                if (!budgetSection.today) return ""
+                var end = new Date(budgetSection.today.endMs)
+                return "Day resets in " + root.formatDuration(budgetSection.today.endMs - root.nowMs)
+                  + " · " + root.dayName(root.dateKey(budgetSection.today.endMs)) + " "
+                  + String(end.getHours()).padStart(2, "0") + ":" + String(end.getMinutes()).padStart(2, "0")
+              }
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
             Item { width: 1; height: Style.space(2) }
 
             BudgetGraph {
@@ -1208,6 +1249,19 @@ Panel {
               text: "LIMITS"
               foreground: root.foreground
               fontFamily: root.fontFamily
+            }
+
+            // Every limit blocks on its own, so with more than one the fullest
+            // is named: it has the least room left.
+            Text {
+              readonly property var closest: root.bindingWindow(root.provider)
+              textFormat: Text.PlainText
+              visible: root.limits.length > 1 && !!closest
+              width: parent.width
+              text: closest ? "Closest to limit: " + closest.title + ", " + Math.round((1 - closest.percent) * 100) + "% left" : ""
+              color: root.limitColor(closest, root.dim)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
             }
 
             Repeater {
@@ -1365,7 +1419,7 @@ Panel {
       width: parent.width
       text: {
         var remainingMs = root.resetMsFor(limitRow.window)
-        return remainingMs > 0 ? "Resets in " + root.formatDuration(remainingMs) : ""
+        return remainingMs > 0 ? "Resets in " + root.formatDuration(remainingMs) : "Reset time unknown"
       }
       color: root.dim
       font.family: root.fontFamily

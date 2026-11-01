@@ -151,9 +151,9 @@ looks like. (`‹‹` sits between, under 0.5x.)
 
 ## The daily budget
 
-Each calendar day gets a seventh of the weekly limit, and whatever you do not
-use carries forward in full. Use 2% on Tuesday and Wednesday has 26.6% to
-spend (14.3 + 12.3).
+Each of the week's seven days gets a seventh of the weekly limit, and whatever
+you do not use carries forward in full. Use 2% on the first day and the second
+has 26.6% to spend (14.3 + 12.3).
 
 - **The big number** is what is left for today: everything allowed up to the
   end of today, minus everything used this week. Past it, it turns red and
@@ -162,18 +162,47 @@ spend (14.3 + 12.3).
   that day used. The tick is what the day had available (its seventh plus
   anything carried in). Days ahead show what they get if every day before
   them ends exactly on budget.
-- **The reset day.** Claude's week runs from the reset hour to the same hour
-  seven days later, which touches eight calendar days. The seven sevenths go
-  to the day the window opened through the day before the reset. The reset
-  day itself lives on whatever you saved.
+- **Day boundaries.** A day runs from the weekly reset's clock time to the
+  same time the next day, so the last day ends exactly at the weekly reset.
+  With a Tuesday 21:00 reset, "Sun" is Saturday 21:00 to Sunday 21:00. Each
+  day is named after the date it mostly covers. Under the meter, "Day resets
+  in" counts down to the next boundary.
 
-Days run midnight to midnight in local time. The headline numbers only need
+The headline numbers only need
 the current weekly percentage, so they are right from the first minute. The
 per-day bars need to know the weekly percentage at the start of each day,
 which the widget records in
 `~/.local/state/omarchy/agents/budget.json` (honours `XDG_STATE_HOME`). A day
 the shell never ran on gets merged into the next day it does run. The budget
 is shown for Claude only.
+
+### Where reset times come from
+
+Nothing about the reset is configured or hardcoded. Every refresh, Omarchy's
+`omarchy-agent-usage-claude` collector asks Anthropic's OAuth usage endpoint
+(`api.anthropic.com/api/oauth/usage`) and writes each window's `resetsAt`
+into the Claude record in `~/.local/state/omarchy/agents/usage/`. The widget reads it from there:
+
+- **5h session.** The countdown is that window's `resetsAt`. It is not
+  rounded to the hour, because the server does not round it either.
+- **Weekly.** Anthropic gives every account a fixed day and time of its own
+  (support.claude.com: "a fixed time each week that is assigned to your
+  account"). The widget takes it from the weekly `resetsAt`, so one account
+  can reset on Tuesday at 21:00 and another on Friday at 08:00.
+- **Daily budget.** Each day starts at the weekly reset's local clock
+  time. The boundaries are recomputed from the weekly `resetsAt` on every
+  refresh and shown in your system time zone. Across a DST change one day
+  runs 23 or 25 hours so the others keep the same clock time.
+
+If a reset jumps by more than an hour, the widget treats it as a new week
+and drops the old days. A free early refill (Settings > Usage) lowers the
+percentage but leaves the reset time alone, so it counts as unused budget.
+A window the server does not send is left out: without a 5h limit the 5h
+half of the pill shows "—". A missing reset time reads "Reset time
+unknown" and never counts down.
+
+The bar cannot read Claude Code's statusline JSON (`rate_limits.*.resets_at`).
+That JSON only goes to a statusline script while a session is running.
 
 ## Settings
 
