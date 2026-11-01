@@ -206,14 +206,15 @@ Panel {
   }
 
   // The eight boundaries of the week's seven days, oldest first, ending at the
-  // reset. Stepping back a calendar day at a time keeps every boundary on the
-  // reset's local clock time, so a DST change gives one 23h or 25h day.
+  // reset itself. Stepping back a calendar day at a time keeps every boundary
+  // on the reset's local clock time, so a DST change gives one 23h or 25h day
+  // (a clock time the change skips lands just after the gap).
   function budgetBounds(resetMs) {
-    var out = []
-    for (var i = 7; i >= 0; i--) {
+    var out = [resetMs]
+    for (var i = 1; i <= 7; i++) {
       var d = new Date(resetMs)
       d.setDate(d.getDate() - i)
-      out.push(d.getTime())
+      out.unshift(d.getTime())
     }
     return out
   }
@@ -225,9 +226,19 @@ Panel {
     return 6
   }
 
-  // A day is named and stored after the date its middle falls on, which is
-  // the date it mostly covers: Sat 21:00 to Sun 21:00 is Sunday.
-  function budgetKey(bounds, index) { return dateKey((bounds[index] + bounds[index + 1]) / 2) }
+  // A day is named and stored after the date it mostly covers: the date it
+  // ends on when the reset is in the afternoon or evening (Sat 21:00 to Sun
+  // 21:00 is Sunday), the date it starts on when the reset is before noon
+  // (Sun 09:00 to Mon 09:00 is Sunday). The boundaries step a calendar day at
+  // a time. The dates are counted back on the calendar rather than read off
+  // the boundaries, so a DST gap that pushes a boundary past midnight cannot
+  // give two days the same name.
+  function budgetKey(bounds, index) {
+    var reset = new Date(bounds[7])
+    var late = reset.getHours() * 60 + reset.getMinutes() >= 12 * 60
+    var back = (late ? 0 : 1) + 6 - index
+    return dateKey(new Date(reset.getFullYear(), reset.getMonth(), reset.getDate() - back, 12).getTime())
+  }
 
   function recordBudget() {
     var w = root.weeklyWindow
@@ -298,9 +309,11 @@ Panel {
         row.over = w.percent > cap
         row.total = w.percent
       } else if (entry) {
+        // A past day is red only when it used more than its own seventh. The
+        // carry-over decides what is left today, not how earlier days look.
         row.budget = cap - entry.start
         row.used = Math.max(0, entry.last - entry.start)
-        row.over = entry.last > cap + 0.0005
+        row.over = row.used > 1 / 7 + 0.0005
       }
       out.push(row)
     }

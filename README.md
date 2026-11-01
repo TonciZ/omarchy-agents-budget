@@ -161,7 +161,9 @@ has 26.6% to spend (14.3 + 12.3).
 - **The graph** has a column per day of the weekly window. The bar is what
   that day used. The tick is what the day had available (its seventh plus
   anything carried in). Days ahead show what they get if every day before
-  them ends exactly on budget.
+  them ends exactly on budget. A past day turns red only when it used more
+  than its own seventh; today turns red when the week is past today's
+  allowance.
 - **Day boundaries.** A day runs from the weekly reset's clock time to the
   same time the next day, so the last day ends exactly at the weekly reset.
   With a Tuesday 21:00 reset, "Sun" is Saturday 21:00 to Sunday 21:00. Each
@@ -191,8 +193,10 @@ into the Claude record in `~/.local/state/omarchy/agents/usage/`. The widget rea
   can reset on Tuesday at 21:00 and another on Friday at 08:00.
 - **Daily budget.** Each day starts at the weekly reset's local clock
   time. The boundaries are recomputed from the weekly `resetsAt` on every
-  refresh and shown in your system time zone. Across a DST change one day
-  runs 23 or 25 hours so the others keep the same clock time.
+  refresh and shown in your system time zone. Any reset hour, weekday and
+  time zone works, including half-hour offsets. Across a DST change one day
+  runs 23 or 25 hours so the others keep the same clock time, and a clock time
+  the change skips moves next to the gap.
 
 If a reset jumps by more than an hour, the widget treats it as a new week
 and drops the old days. A free early refill (Settings > Usage) lowers the
