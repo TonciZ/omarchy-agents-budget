@@ -297,7 +297,8 @@ Panel {
       var key = budgetKey(bounds, index)
       var cap = budgetCap(index)
       var row = { key: key, label: dayName(key), today: index === todayIndex, future: index > todayIndex,
-                  cap: cap, budget: -1, used: -1, over: false, endMs: bounds[index + 1] }
+                  cap: cap, budget: -1, used: -1, over: false, endMs: bounds[index + 1],
+                  balance: 0, hasBalance: false, carried: 0 }
       var entry = stored[key]
       if (row.future) {
         // What the day has if every day before it ends exactly on budget.
@@ -308,6 +309,11 @@ Panel {
         row.used = w.percent - start
         row.over = w.percent > cap
         row.total = w.percent
+        // Saved (+) or owed (-) from earlier days, and where today ends if
+        // nothing more is used.
+        row.carried = (index > 0 ? budgetCap(index - 1) : 0) - start
+        row.balance = cap - w.percent
+        row.hasBalance = true
       } else if (entry) {
         // A past day is measured against its own seventh, line and color
         // alike. The carry-over decides what is left today, not how earlier
@@ -315,6 +321,8 @@ Panel {
         row.budget = 1 / 7
         row.used = Math.max(0, entry.last - entry.start)
         row.over = row.used > 1 / 7 + 0.0005
+        row.balance = cap - entry.last
+        row.hasBalance = true
       }
       out.push(row)
     }
@@ -577,14 +585,28 @@ Panel {
         var parsed = JSON.parse(text())
         root.batteryView = !!parsed.battery
         root.batteryScaled = !!parsed.scaled
+        root.graphBalance = parsed.graph === "balance"
       } catch (e) {}
     }
   }
 
+  // The budget graph's view: today's share (default) or the week's balance.
+  property bool graphBalance: false
+
   function setView(battery, scaled) {
     batteryView = battery
     batteryScaled = scaled
-    viewFile.setText(JSON.stringify({ battery: battery, scaled: scaled }, null, 2) + "\n")
+    writeView()
+  }
+
+  function setGraphBalance(on) {
+    graphBalance = on
+    writeView()
+  }
+
+  function writeView() {
+    viewFile.setText(JSON.stringify({ battery: batteryView, scaled: batteryScaled,
+                                      graph: graphBalance ? "balance" : "today" }, null, 2) + "\n")
   }
 
   readonly property bool showBattery: batteryView && !!budgetToday
@@ -1154,6 +1176,8 @@ Panel {
             BudgetGraph {
               width: parent.width
               days: root.budgetDays
+              balanceView: root.graphBalance
+              onToggled: root.setGraphBalance(!root.graphBalance)
             }
 
             Item { width: 1; height: Style.space(2) }
@@ -1473,99 +1497,255 @@ Panel {
 
   }
 
-  // One column per day of the weekly window: what was used, with a tick at
-  // what the day had available (its seventh plus anything carried in). Days
-  // still ahead show what they get if every day before ends on budget.
-  component BudgetGraph: Column {
+  // One column per day of the weekly window, in one of two views that a click
+  // switches between (remembered in view.json):
+  // - today: what each day used, with a line at the day's own seventh. Today's
+  //   column also outlines its seventh, with the part owed from earlier days
+  //   in red or the part saved earlier stacked on top, so the gap between
+  //   today's share and what today really has reads at a glance.
+  // - balance: the week's running balance after each day, above or below a
+  //   zero line. Today's point is where the day ends if nothing more is used.
+  // Days still ahead show what they get if every day before ends on budget.
+  component BudgetGraph: Item {
     id: graph
     property var days: []
+    property bool balanceView: false
+    signal toggled()
+
     readonly property real gap: Style.space(4)
     readonly property real columnWidth: (width - gap * Math.max(0, days.length - 1)) / Math.max(1, days.length)
+    readonly property real share: 1 / 7
     readonly property real peak: {
       var m = 0.01
-      for (var i = 0; i < days.length; i++) m = Math.max(m, days[i].used, days[i].budget)
+      for (var i = 0; i < days.length; i++) {
+        m = Math.max(m, days[i].used, days[i].budget)
+        if (days[i].today) m = Math.max(m, share, share + days[i].carried)
+      }
       return m * 1.1
     }
+    readonly property real balancePeak: {
+      var m = share / 2
+      for (var i = 0; i < days.length; i++)
+        if (days[i].hasBalance) m = Math.max(m, Math.abs(days[i].balance))
+      return m * 1.15
+    }
+    readonly property var todayRow: {
+      for (var i = 0; i < days.length; i++)
+        if (days[i].today) return days[i]
+      return null
+    }
 
-    spacing: Style.space(2)
+    implicitHeight: graphColumn.implicitHeight
 
-    Row {
-      spacing: graph.gap
+    function signedPercent(fraction) {
+      var v = Math.round(Math.abs(fraction) * 100)
+      return v === 0 ? "0" : (fraction < 0 ? "−" : "+") + v
+    }
 
-      Repeater {
-        model: graph.days
+    function cssColor(c, a) {
+      return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + a + ")"
+    }
 
-        Item {
-          required property var modelData
-          width: graph.columnWidth
-          height: Style.space(34)
+    Column {
+      id: graphColumn
+      width: parent.width
+      spacing: Style.space(2)
 
-          Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: root.track
-          }
+      Item {
+        width: parent.width
+        height: Style.space(34)
 
-          Rectangle {
-            visible: modelData.used > 0
-            anchors.bottom: parent.bottom
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: parent.width * 0.6
-            height: Math.max(1, parent.height * modelData.used / graph.peak)
-            radius: Style.space(2)
-            color: modelData.over ? root.urgent
-              : modelData.today ? root.foreground : root.alpha(root.foreground, 0.55)
-          }
+        Row {
+          spacing: graph.gap
+          visible: !graph.balanceView
 
-          Rectangle {
-            visible: modelData.budget > 0
-            y: Math.round(parent.height * (1 - modelData.budget / graph.peak))
-            width: parent.width
-            height: 1
-            color: modelData.future ? root.alpha(root.dim, 0.5) : root.dim
+          Repeater {
+            model: graph.days
+
+            Item {
+              required property var modelData
+              width: graph.columnWidth
+              height: Style.space(34)
+
+              readonly property real unit: height / graph.peak
+
+              Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: root.track
+              }
+
+              // Today's seventh as an outline, then what earlier days added
+              // to it or took from it.
+              Rectangle {
+                visible: modelData.today
+                anchors.bottom: parent.bottom
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width * 0.6
+                height: Math.max(1, parent.unit * graph.share)
+                radius: Style.space(2)
+                color: "transparent"
+                border.width: 1
+                border.color: root.dim
+              }
+
+              Rectangle {
+                visible: modelData.today && modelData.carried < -0.0005
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width * 0.6
+                height: parent.unit * Math.min(graph.share, -modelData.carried)
+                y: parent.height - parent.unit * graph.share
+                color: root.alpha(root.urgent, 0.4)
+              }
+
+              Rectangle {
+                visible: modelData.today && modelData.carried > 0.0005
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width * 0.6
+                height: parent.unit * modelData.carried
+                y: parent.height - parent.unit * (graph.share + modelData.carried)
+                radius: Style.space(2)
+                color: root.alpha(root.foreground, 0.25)
+              }
+
+              Rectangle {
+                visible: modelData.used > 0
+                anchors.bottom: parent.bottom
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width * 0.6
+                height: Math.max(1, parent.unit * modelData.used)
+                radius: Style.space(2)
+                color: modelData.over ? root.urgent
+                  : modelData.today ? root.foreground : root.alpha(root.foreground, 0.55)
+              }
+
+              Rectangle {
+                visible: modelData.budget > 0
+                y: Math.round(parent.height - parent.unit * modelData.budget)
+                width: parent.width
+                height: 1
+                color: modelData.future ? root.alpha(root.dim, 0.5) : root.dim
+              }
+            }
           }
         }
+
+        Rectangle {
+          visible: graph.balanceView
+          y: Math.round(parent.height / 2)
+          width: parent.width
+          height: 1
+          color: root.track
+        }
+
+        Canvas {
+          id: balanceCanvas
+          anchors.fill: parent
+          visible: graph.balanceView
+
+          readonly property var source: graph.days
+          onSourceChanged: requestPaint()
+          onVisibleChanged: requestPaint()
+          onWidthChanged: requestPaint()
+          onHeightChanged: requestPaint()
+
+          onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            if (!graph.balanceView) return
+            var mid = Math.round(height / 2) + 0.5
+            var scale = (height / 2 - 3) / graph.balancePeak
+            var points = []
+            for (var i = 0; i < graph.days.length; i++) {
+              var d = graph.days[i]
+              if (!d.hasBalance) continue
+              points.push({ x: i * (graph.columnWidth + graph.gap) + graph.columnWidth / 2,
+                            y: mid - d.balance * scale, owed: d.balance < -0.0005, today: d.today })
+            }
+            ctx.lineWidth = 1.5
+            ctx.strokeStyle = graph.cssColor(root.foreground, 0.7)
+            ctx.beginPath()
+            for (var j = 0; j < points.length; j++) {
+              if (j === 0) ctx.moveTo(points[j].x, points[j].y)
+              else ctx.lineTo(points[j].x, points[j].y)
+            }
+            ctx.stroke()
+            for (var k = 0; k < points.length; k++) {
+              ctx.fillStyle = graph.cssColor(points[k].owed ? root.urgent : root.foreground, 1)
+              ctx.beginPath()
+              ctx.arc(points[k].x, points[k].y, points[k].today ? 3.5 : 2.5, 0, 2 * Math.PI)
+              ctx.fill()
+            }
+          }
+        }
+      }
+
+      Row {
+        spacing: graph.gap
+
+        Repeater {
+          model: graph.days
+
+          Text {
+            required property var modelData
+            width: graph.columnWidth
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: modelData.label
+            color: modelData.today ? root.foreground : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: modelData.today
+          }
+        }
+      }
+
+      Row {
+        spacing: graph.gap
+
+        Repeater {
+          model: graph.days
+
+          Text {
+            required property var modelData
+            width: graph.columnWidth
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: graph.balanceView
+              ? (modelData.hasBalance ? graph.signedPercent(modelData.balance) : "·")
+              : (modelData.used >= 0 ? String(Math.round(modelData.used * 100)) : "·")
+            color: graph.balanceView && modelData.hasBalance && modelData.balance < -0.0005 ? root.urgent
+              : modelData.today ? root.foreground : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+      }
+
+      Text {
+        width: parent.width
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        text: {
+          if (graph.balanceView) return "Week balance after each day · click to switch"
+          var t = graph.todayRow
+          if (!t) return ""
+          var head = root.budgetPercent(graph.share)
+          if (t.carried < -0.0005) head += " − " + root.budgetPercent(-t.carried) + " owed = " + root.budgetPercent(t.budget)
+          else if (t.carried > 0.0005) head += " + " + root.budgetPercent(t.carried) + " saved = " + root.budgetPercent(t.budget)
+          return head + " today · click to switch"
+        }
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
       }
     }
 
-    Row {
-      spacing: graph.gap
-
-      Repeater {
-        model: graph.days
-
-        Text {
-          required property var modelData
-          width: graph.columnWidth
-          horizontalAlignment: Text.AlignHCenter
-          textFormat: Text.PlainText
-          text: modelData.label
-          color: modelData.today ? root.foreground : root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: modelData.today
-        }
-      }
-    }
-
-    Row {
-      spacing: graph.gap
-
-      Repeater {
-        model: graph.days
-
-        Text {
-          required property var modelData
-          width: graph.columnWidth
-          horizontalAlignment: Text.AlignHCenter
-          textFormat: Text.PlainText
-          text: modelData.used >= 0 ? String(Math.round(modelData.used * 100)) : "·"
-          color: modelData.today ? root.foreground : root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-      }
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: graph.toggled()
     }
   }
 

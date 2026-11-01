@@ -158,12 +158,17 @@ has 26.6% to spend (14.3 + 12.3).
 - **The big number** is what is left for today: everything allowed up to the
   end of today, minus everything used this week. Past it, it turns red and
   shows how far over you are.
-- **The graph** has a column per day of the weekly window. The bar is what
-  that day used. On past days the line is the day's own seventh, and the bar
-  turns red when it goes past it. Today's line is what today has, including
-  anything saved or overspent earlier, and today turns red when the week is
-  past it. Days ahead show what they get if every day before them ends
-  exactly on budget.
+- **The graph** has a column per day of the weekly window and two views.
+  Click it to switch, and it remembers the last one.
+  - **Today** (default): the bar is what each day used. On past days the
+    line is the day's own seventh, and the bar turns red when it goes past
+    it. Today's column outlines its seventh, with the part owed from earlier
+    days in red or the part saved earlier stacked on top. The caption spells
+    it out, e.g. "14.3% − 2.9% owed = 11.4% today". Days ahead show what
+    they get if every day before them ends exactly on budget.
+  - **Balance**: a line through the week's running balance after each day,
+    above zero when ahead and red below it when behind, with the numbers
+    underneath. Today's point is where the day ends if nothing more is used.
 - **Day boundaries.** A day runs from the weekly reset's clock time to the
   same time the next day, so the last day ends exactly at the weekly reset.
   With a Tuesday 21:00 reset, "Sun" is Saturday 21:00 to Sunday 21:00. Each
