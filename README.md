@@ -1,6 +1,6 @@
 # Agents Budget
 
-![Agents Budget: the bar pill and the panel](preview.png)
+<img src="preview.png" width="452" alt="Agents Budget: the bar pill and the panel">
 
 The Omarchy **Agents** bar widget with two additions for Claude Code users:
 
@@ -109,13 +109,13 @@ Every look the bar pill can have, captured from a live bar.
 
 **Split view** (default). 5h session on top, labelled with the time to its
 reset, and the week below. Each half fills left to right and turns yellow,
-then red, as it gets close to its limit (here the 5h is at 69%).
+then red, as it gets close to its limit (70% and 80% for the 5h).
 
 ![Battery view, percent](screenshots/pill-battery-percent.png)
 
 **Battery view, actual percent.** Middle click the pill. One battery for
 today's budget, showing how much of the weekly limit is left for today
-(6.1%). The strip underneath is the 5h session. On pace it ends flat, and
+(8.4%). The strip underneath is the 5h session. On pace it ends flat, and
 the small gap marks how much of the 5 hours has gone by.
 
 ![Battery view, counting from 100](screenshots/pill-battery-100.png)
@@ -135,14 +135,13 @@ The line turns yellow.
 
 ![Burning at 1.1x to 1.4x](screenshots/pill-fast1.png)
 
-**`›` Slightly fast, 1.1x to 1.4x.** Normally the line keeps its usual
-color. It is yellow here only because this session had already reached 70%,
-and the limit warning wins over a calm pace.
+**`›` Slightly fast, 1.1x to 1.4x.** The line keeps its usual color. It
+only turns yellow or red here if the 5h session itself has reached 70% or
+80%, since the limit warning wins over a calm pace.
 
 ![Slower than the limit](screenshots/pill-slow1.png)
 
-**`‹` Slower, under 0.8x.** You have room to spare. Same 70% warning color
-as above.
+**`‹` Slower, under 0.8x.** You have room to spare.
 
 ![Barely using it](screenshots/pill-slow3.png)
 
@@ -169,6 +168,18 @@ has 26.6% to spend (14.3 + 12.3).
   - **Balance**: a line through the week's running balance after each day,
     above zero when ahead and red below it when behind, with the numbers
     underneath. Today's point is where the day ends if nothing more is used.
+
+<img src="screenshots/graph-today.png" width="500" alt="Today view: Wed, Thu and Fri went over their seventh, so today's column shows 2.9% owed in red">
+
+**Today view.** Wed and Fri used more than their own seventh and turned red.
+Today's column is outlined at its seventh, and the red cap on top is the 2.9%
+still owed from earlier days, so today has 14.3% − 2.9% = 11.4%. The low bar
+inside it is what today has used so far.
+
+<img src="screenshots/graph-balance.png" width="500" alt="Balance view: the week's running balance after each day, below zero Wed to Sat and +8 on Sunday">
+
+**Balance view.** The same week as a running balance. It sat below zero from
+Wed to Sat (red), and today ends 8 points ahead if nothing more is used.
 - **Day boundaries.** A day runs from the weekly reset's clock time to the
   same time the next day, so the last day ends exactly at the weekly reset.
   With a Tuesday 21:00 reset, "Sun" is Saturday 21:00 to Sunday 21:00. Each
