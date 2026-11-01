@@ -159,11 +159,11 @@ has 26.6% to spend (14.3 + 12.3).
   end of today, minus everything used this week. Past it, it turns red and
   shows how far over you are.
 - **The graph** has a column per day of the weekly window. The bar is what
-  that day used. The tick is what the day had available (its seventh plus
-  anything carried in). Days ahead show what they get if every day before
-  them ends exactly on budget. A past day turns red only when it used more
-  than its own seventh; today turns red when the week is past today's
-  allowance.
+  that day used. On past days the line is the day's own seventh, and the bar
+  turns red when it goes past it. Today's line is what today has, including
+  anything saved or overspent earlier, and today turns red when the week is
+  past it. Days ahead show what they get if every day before them ends
+  exactly on budget.
 - **Day boundaries.** A day runs from the weekly reset's clock time to the
   same time the next day, so the last day ends exactly at the weekly reset.
   With a Tuesday 21:00 reset, "Sun" is Saturday 21:00 to Sunday 21:00. Each

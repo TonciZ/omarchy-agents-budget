@@ -309,9 +309,10 @@ Panel {
         row.over = w.percent > cap
         row.total = w.percent
       } else if (entry) {
-        // A past day is red only when it used more than its own seventh. The
-        // carry-over decides what is left today, not how earlier days look.
-        row.budget = cap - entry.start
+        // A past day is measured against its own seventh, line and color
+        // alike. The carry-over decides what is left today, not how earlier
+        // days look.
+        row.budget = 1 / 7
         row.used = Math.max(0, entry.last - entry.start)
         row.over = row.used > 1 / 7 + 0.0005
       }
