@@ -175,7 +175,7 @@ Panel {
   // day's start lives in budget.json so the graph can show what each day used.
 
   readonly property string budgetPath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/agents/budget.json"
-  property var budgetState: ({ reset: "", days: {} })
+  property var budgetState: ({ reset: "", days: {}, off: [] })
   property bool budgetLoaded: false
 
   FileView {
@@ -259,6 +259,9 @@ Panel {
         if (budgetState.days[k]) days[k] = budgetState.days[k]
       }
     }
+    var weekKeys = []
+    for (var wk = 0; wk < 7; wk++) weekKeys.push(budgetKey(bounds, wk))
+    var off = (budgetState.off || []).filter(function(k) { return weekKeys.indexOf(k) >= 0 })
     var key = budgetKey(bounds, index)
     var day = days[key]
     if (!day) {
@@ -269,20 +272,51 @@ Panel {
         if (k2 < key && k2 > previous) previous = k2
       var start = previous !== "" ? days[previous].last : (index === 0 ? 0 : w.percent)
       day = { start: Math.min(start, w.percent), last: w.percent }
-    } else if (!fresh && day.last === w.percent) {
+    } else if (!fresh && day.last === w.percent && off.length === (budgetState.off || []).length) {
       return
     } else {
       day = { start: Math.min(day.start, w.percent), last: w.percent }
     }
     days[key] = day
-    budgetState = { reset: w.resetAt, days: days }
+    budgetState = { reset: w.resetAt, days: days, off: off }
     budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
   }
 
-  // Each of the seven days gets a seventh of the week, and whatever is not
-  // used carries forward in full: by the end of day i (0-based) up to
-  // (i + 1) / 7 may be used.
-  function budgetCap(index) { return Math.min(1, (index + 1) / 7) }
+  // Days off: right click a day in the graph (today or later) to give it
+  // nothing, and its seventh is split evenly over the other days. Kept as
+  // date keys in budget.json and dropped once the week is over.
+  function isDayOff(key) { return (budgetState.off || []).indexOf(key) >= 0 }
+
+  function toggleDayOff(row) {
+    if (!row || (!row.today && !row.future)) return
+    var off = (budgetState.off || []).slice()
+    var at = off.indexOf(row.key)
+    if (at >= 0) off.splice(at, 1)
+    else if (off.length < 6) off.push(row.key)  // at least one day keeps the week
+    else return
+    budgetState = { reset: budgetState.reset, days: budgetState.days || {}, off: off }
+    budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
+  }
+
+  // Each day that is not off gets an equal share of the week (a seventh with
+  // no days off), and whatever is not used carries forward in full: by the end
+  // of day i (0-based) up to the shares of days 0..i may be used.
+  function budgetShares(bounds) {
+    var on = []
+    var count = 0
+    for (var i = 0; i < 7; i++) {
+      on.push(!isDayOff(budgetKey(bounds, i)))
+      if (on[i]) count++
+    }
+    if (count === 0) { on = [true, true, true, true, true, true, true]; count = 7 }
+    return on.map(function(x) { return x ? 1 / count : 0 })
+  }
+
+  function budgetCapFrom(shares, index) {
+    var sum = 0
+    for (var i = 0; i <= index && i < shares.length; i++) sum += shares[i]
+    return index >= 6 ? 1 : Math.min(1, sum)
+  }
 
   readonly property var budgetDays: {
     var w = root.weeklyWindow
@@ -292,13 +326,15 @@ Panel {
     var bounds = budgetBounds(reset)
     var stored = budgetState.days || {}
     var todayIndex = budgetIndex(bounds, root.nowMs)
+    var shares = budgetShares(bounds)
+    function budgetCap(i) { return budgetCapFrom(shares, i) }
     var out = []
     for (var index = 0; index < 7; index++) {
       var key = budgetKey(bounds, index)
       var cap = budgetCap(index)
       var row = { key: key, label: dayName(key), today: index === todayIndex, future: index > todayIndex,
                   cap: cap, budget: -1, used: -1, over: false, endMs: bounds[index + 1],
-                  balance: 0, hasBalance: false, carried: 0 }
+                  balance: 0, hasBalance: false, carried: 0, share: shares[index], off: isDayOff(key) }
       var entry = stored[key]
       if (row.future) {
         // What the day has if every day before it ends exactly on budget.
@@ -315,12 +351,12 @@ Panel {
         row.balance = cap - w.percent
         row.hasBalance = true
       } else if (entry) {
-        // A past day is measured against its own seventh, line and color
+        // A past day is measured against its own share, line and color
         // alike. The carry-over decides what is left today, not how earlier
         // days look.
-        row.budget = 1 / 7
+        row.budget = shares[index]
         row.used = Math.max(0, entry.last - entry.start)
-        row.over = row.used > 1 / 7 + 0.0005
+        row.over = row.used > shares[index] + 0.0005
         row.balance = cap - entry.last
         row.hasBalance = true
       }
@@ -1178,6 +1214,7 @@ Panel {
               days: root.budgetDays
               balanceView: root.graphBalance
               onToggled: root.setGraphBalance(!root.graphBalance)
+              onDayOffToggled: function(row) { root.toggleDayOff(row) }
             }
 
             Item { width: 1; height: Style.space(2) }
@@ -1185,7 +1222,8 @@ Panel {
             Toggle {
               width: parent.width
               label: "Left today in the bar"
-              description: "One battery pill instead of 5h and week. Activate on middle click."
+              implicitHeight: Style.spacing.controlHeight
+              titleSize: Style.font.body
               checked: root.batteryView
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -1196,10 +1234,11 @@ Panel {
             Toggle {
               width: parent.width
               label: "Count today from 100"
+              implicitHeight: Style.spacing.controlHeight
+              titleSize: Style.font.body
               // Only means something with the battery on.
               enabled: root.batteryView
               opacity: enabled ? 1 : 0.4
-              description: "Off shows the actual percent left. On counts today down from 100 to 0."
               checked: root.batteryScaled
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -1511,6 +1550,7 @@ Panel {
     property var days: []
     property bool balanceView: false
     signal toggled()
+    signal dayOffToggled(var row)
 
     readonly property real gap: Style.space(4)
     readonly property real columnWidth: (width - gap * Math.max(0, days.length - 1)) / Math.max(1, days.length)
@@ -1519,7 +1559,7 @@ Panel {
       var m = 0.01
       for (var i = 0; i < days.length; i++) {
         m = Math.max(m, days[i].used, days[i].budget)
-        if (days[i].today) m = Math.max(m, share, share + days[i].carried)
+        if (days[i].today) m = Math.max(m, days[i].share, days[i].share + days[i].carried)
       }
       return m * 1.1
     }
@@ -1536,6 +1576,30 @@ Panel {
     }
 
     implicitHeight: graphColumn.implicitHeight
+
+    // The rows of the stats box under the graph.
+    readonly property var statRows: {
+      var t = todayRow
+      if (!t) return []
+      var rows = []
+      var off = []
+      for (var i = 0; i < days.length; i++)
+        if (days[i].off) off.push(days[i].label)
+      if (balanceView) {
+        rows.push({ label: "Week balance if you stop now", value: signedPercent(t.balance) + "%",
+                    alarm: t.balance < -0.0005, bold: true })
+      } else {
+        rows.push({ label: t.off ? "Today's share (day off)" : "Today's share",
+                    value: root.budgetPercent(t.share) })
+        if (t.carried < -0.0005)
+          rows.push({ label: "Owed from earlier days", value: "−" + root.budgetPercent(-t.carried), alarm: true })
+        else if (t.carried > 0.0005)
+          rows.push({ label: "Saved from earlier days", value: "+" + root.budgetPercent(t.carried) })
+        rows.push({ label: "Today has", value: root.budgetPercent(t.budget), alarm: t.budget < 0, bold: true })
+      }
+      rows.push({ label: "Days off", value: off.length ? off.join(", ") : "none" })
+      return rows
+    }
 
     function signedPercent(fraction) {
       var v = Math.round(Math.abs(fraction) * 100)
@@ -1569,6 +1633,14 @@ Panel {
 
               readonly property real unit: height / graph.peak
 
+              // A day off is greyed out behind everything else.
+              Rectangle {
+                visible: modelData.off
+                anchors.fill: parent
+                radius: Style.space(2)
+                color: root.alpha(root.dim, 0.18)
+              }
+
               Rectangle {
                 anchors.bottom: parent.bottom
                 width: parent.width
@@ -1579,11 +1651,11 @@ Panel {
               // Today's seventh as an outline, then what earlier days added
               // to it or took from it.
               Rectangle {
-                visible: modelData.today
+                visible: modelData.today && modelData.share > 0
                 anchors.bottom: parent.bottom
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: parent.width * 0.6
-                height: Math.max(1, parent.unit * graph.share)
+                height: Math.max(1, parent.unit * modelData.share)
                 radius: Style.space(2)
                 color: "transparent"
                 border.width: 1
@@ -1594,8 +1666,8 @@ Panel {
                 visible: modelData.today && modelData.carried < -0.0005
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: parent.width * 0.6
-                height: parent.unit * Math.min(graph.share, -modelData.carried)
-                y: parent.height - parent.unit * graph.share
+                height: parent.unit * Math.min(modelData.share, -modelData.carried)
+                y: parent.height - parent.unit * modelData.share
                 color: root.alpha(root.urgent, 0.4)
               }
 
@@ -1604,7 +1676,7 @@ Panel {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: parent.width * 0.6
                 height: parent.unit * modelData.carried
-                y: parent.height - parent.unit * (graph.share + modelData.carried)
+                y: parent.height - parent.unit * (modelData.share + modelData.carried)
                 radius: Style.space(2)
                 color: root.alpha(root.foreground, 0.25)
               }
@@ -1693,6 +1765,7 @@ Panel {
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
             text: modelData.label
+            font.strikeout: modelData.off
             color: modelData.today ? root.foreground : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -1714,7 +1787,7 @@ Panel {
             textFormat: Text.PlainText
             text: graph.balanceView
               ? (modelData.hasBalance ? graph.signedPercent(modelData.balance) : "·")
-              : (modelData.used >= 0 ? String(Math.round(modelData.used * 100)) : "·")
+              : (modelData.used >= 0 ? String(Math.round(modelData.used * 100)) : modelData.off ? "off" : "·")
             color: graph.balanceView && modelData.hasBalance && modelData.balance < -0.0005 ? root.urgent
               : modelData.today ? root.foreground : root.dim
             font.family: root.fontFamily
@@ -1723,29 +1796,83 @@ Panel {
         }
       }
 
+      Item { width: 1; height: Style.space(4) }
+
+      // Today's numbers in a small box: label on the left, value on the right.
+      BorderSurface {
+        id: statsBox
+        width: parent.width
+        implicitHeight: statsColumn.implicitHeight + Style.space(8) * 2
+        color: root.alpha(root.foreground, 0.04)
+        borderSpec: Border.flat(root.alpha(root.foreground, 0.15), 1)
+        radius: Style.cornerRadius
+
+        Column {
+          id: statsColumn
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.leftMargin: Style.space(10)
+          anchors.rightMargin: Style.space(10)
+          spacing: Style.space(3)
+
+          Repeater {
+            model: graph.statRows
+
+            Item {
+              required property var modelData
+              width: statsColumn.width
+              implicitHeight: Math.max(statLabel.implicitHeight, statValue.implicitHeight)
+
+              Text {
+                id: statLabel
+                anchors.left: parent.left
+                textFormat: Text.PlainText
+                text: modelData.label
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                id: statValue
+                anchors.right: parent.right
+                anchors.baseline: statLabel.baseline
+                textFormat: Text.PlainText
+                text: modelData.value
+                color: modelData.alarm ? root.urgent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: !!modelData.bold
+              }
+            }
+          }
+        }
+      }
+
       Text {
         width: parent.width
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        text: {
-          if (graph.balanceView) return "Week balance after each day · click to switch"
-          var t = graph.todayRow
-          if (!t) return ""
-          var head = root.budgetPercent(graph.share)
-          if (t.carried < -0.0005) head += " − " + root.budgetPercent(-t.carried) + " owed = " + root.budgetPercent(t.budget)
-          else if (t.carried > 0.0005) head += " + " + root.budgetPercent(t.carried) + " saved = " + root.budgetPercent(t.budget)
-          return head + " today · click to switch"
-        }
-        color: root.dim
+        horizontalAlignment: Text.AlignHCenter
+        text: "Click the graph: switch view · Right click a day: day off"
+        color: root.alpha(root.dim, 0.8)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
     }
 
+    // Only the columns and their labels are clickable, not the stats box.
     MouseArea {
-      anchors.fill: parent
+      width: parent.width
+      height: statsBox.y
       cursorShape: Qt.PointingHandCursor
-      onClicked: graph.toggled()
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
+      onClicked: function(mouse) {
+        if (mouse.button !== Qt.RightButton) { graph.toggled(); return }
+        var i = Math.floor(mouse.x / (graph.columnWidth + graph.gap))
+        if (i >= 0 && i < graph.days.length) graph.dayOffToggled(graph.days[i])
+      }
     }
   }
 

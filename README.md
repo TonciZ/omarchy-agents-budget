@@ -12,7 +12,7 @@ The Omarchy **Agents** bar widget with two additions for Claude Code users:
   a strip underneath that shows how fast the 5h session is burning.
 - **A daily budget in the panel.** Your weekly limit split into a running
   daily allowance, so you can pace a week of work instead of finding out on
-  day five that it is gone.
+  day five that it is gone. Mark days off and their share goes to the rest.
 
 Everything else is the stock Agents panel: limits, tokens by day, tokens by
 model, Codex and Fireworks tabs, cross-machine sync.
@@ -162,24 +162,33 @@ has 26.6% to spend (14.3 + 12.3).
   - **Today** (default): the bar is what each day used. On past days the
     line is the day's own seventh, and the bar turns red when it goes past
     it. Today's column outlines its seventh, with the part owed from earlier
-    days in red or the part saved earlier stacked on top. The caption spells
-    it out, e.g. "14.3% − 2.9% owed = 11.4% today". Days ahead show what
-    they get if every day before them ends exactly on budget.
+    days in red or the part saved earlier stacked on top. Days ahead show
+    what they get if every day before them ends exactly on budget.
   - **Balance**: a line through the week's running balance after each day,
     above zero when ahead and red below it when behind, with the numbers
     underneath. Today's point is where the day ends if nothing more is used.
+- **The stats box** under the graph spells out today: its share, what is
+  owed or saved from earlier days, what today has in total, and which days
+  are off. In Balance view it shows where the week ends if you stop now.
+- **Days off.** Right click a day in the graph (today or later) to mark it
+  off, and again to undo. A day off gets nothing and its share is split
+  evenly over the other days, so with Saturday off every other day gets a
+  sixth (16.7%) instead of a seventh. Mark it on Thursday and you can go a
+  little over 1/7 that day without the red "over" showing. Up to 6 days can
+  be off. They are kept in `budget.json` and cleared at the weekly reset.
 
-<img src="screenshots/graph-today.png" width="500" alt="Today view: Wed, Thu and Fri went over their seventh, so today's column shows 2.9% owed in red">
+<img src="screenshots/graph-today.png" width="500" alt="Today view: Saturday is greyed out as a day off, Wednesday went over its share, today has 13.3%">
 
-**Today view.** Wed and Fri used more than their own seventh and turned red.
-Today's column is outlined at its seventh, and the red cap on top is the 2.9%
-still owed from earlier days, so today has 14.3% − 2.9% = 11.4%. The low bar
-inside it is what today has used so far.
+**Today view.** Sat is marked off and greyed out, so the other six days get
+16.7% each instead of 14.3%. Wed used 20%, more than its own share, and
+turned red. Today's column is outlined at its 16.7%, the red cap on top is
+the 3.3% still owed from Wed, and the bar inside is what today has used so
+far. The stats box spells it out: 16.7% − 3.3% = 13.3% for today.
 
-<img src="screenshots/graph-balance.png" width="500" alt="Balance view: the week's running balance after each day, below zero Wed to Sat and +8 on Sunday">
+<img src="screenshots/graph-balance.png" width="500" alt="Balance view: Wednesday ended 3 points behind, today ends 2 ahead">
 
-**Balance view.** The same week as a running balance. It sat below zero from
-Wed to Sat (red), and today ends 8 points ahead if nothing more is used.
+**Balance view.** The same week as a running balance. Wed ended 3 points
+behind (red), and today ends 2 points ahead if nothing more is used.
 - **Day boundaries.** A day runs from the weekly reset's clock time to the
   same time the next day, so the last day ends exactly at the weekly reset.
   With a Tuesday 21:00 reset, "Sun" is Saturday 21:00 to Sunday 21:00. Each
@@ -245,6 +254,8 @@ omarchy bar set io.github.tonciz.agents-budget refreshIntervalSec 30 --json
 
 - Bar: left click opens the panel, right click launches your default agent
   (`omarchy default agent claude`), middle click switches the battery view.
+- Budget graph: left click switches Today and Balance views, right click a
+  day marks it off.
 - Panel: `h`/`l` switch subscription, `j`/`k` scroll, `r` or Enter refresh,
   Esc closes.
 - IPC: `omarchy-shell io.github.tonciz.agents-budget <open|close|toggle|refresh|next>`.
