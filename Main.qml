@@ -239,6 +239,15 @@ Item {
     }
   }
 
+  // After an upgrade the CLI's profile carries the new tier (max_5x) but
+  // .credentials.json keeps the old subscription ("pro") until the next
+  // /login, so the stock collector prints "Pro 5x". Only Max has a
+  // multiplier, so a Pro or Free label that carries one is a Max account
+  // with a stale name. Team and Enterprise seats keep their own name.
+  function planLabel(tier) {
+    return tier.replace(/^(pro|free)(\s+\d+x)$/i, "Max$2")
+  }
+
   function displayProvider(record) {
     var stats = syncedStatsFor(String(record.id))
     var synced = !!stats
@@ -254,7 +263,7 @@ Item {
       // Rate limits and balances stay per-account and are never merged
       // across devices.
       limits: Array.isArray(record.limits) ? record.limits : [],
-      tierLabel: String(record.tierLabel || ""),
+      tierLabel: planLabel(String(record.tierLabel || "")),
       balance: balanceValue(record.balance),
 
       todayPrompts: synced ? numberValue(stats.todayPrompts) : numberValue(record.todayPrompts),
@@ -291,6 +300,15 @@ Item {
   readonly property string syncEffectiveDir: expandPath(syncDir)
   readonly property string syncEffectiveFileName: safeSnapshotFileName(syncFileName, syncDeviceId)
   readonly property string syncEffectiveDeviceId: safeDeviceId(syncDeviceId || syncEffectiveFileName.replace(/\.json$/i, ""))
+  // Limits on what synced snapshots may make the shell read and hold. Each is
+  // far above what a real snapshot carries; past them the rest is ignored.
+  readonly property int syncMaxFiles: 16
+  readonly property int syncMaxFileBytes: 131072
+  readonly property int syncMaxProviders: 32
+  readonly property int syncMaxModels: 64
+  readonly property int syncMaxDates: 1000
+  readonly property int syncMaxRecentDays: 31
+
   readonly property string syncSnapshotPath: syncConfigured() ? syncEffectiveDir + "/" + syncEffectiveFileName : home + "/.cache/omarchy/agents-disabled.json"
   property var aggregateData: ({})
   property int syncRevision: 0
@@ -419,8 +437,16 @@ Item {
       finishSyncRun()
       return
     }
-    var script = "dir=$0; [[ -d \"$dir\" ]] || exit 0; shopt -s nullglob; for f in \"$dir\"/*.json; do [[ -f \"$f\" ]] || continue; printf '===%s===\\n' \"$f\"; cat \"$f\"; printf '\\n=== EOM ===\\n'; done"
-    syncScanProcess.command = ["bash", "-c", script, root.syncEffectiveDir]
+    // Anyone who can write to the shared folder decides what the shell reads,
+    // so the scan is bounded before anything reaches QML: regular files only
+    // (no symlinks or devices), at most syncMaxFiles of them, each skipped
+    // above syncMaxFileBytes and read with head -c so one that grows between
+    // the size check and the read is still cut off. A real snapshot is a few KB.
+    var script = "dir=$0; maxFiles=$1; maxBytes=$2; [[ -d \"$dir\" ]] || exit 0; n=0; "
+      + "while IFS= read -r -d '' f; do (( n++ < maxFiles )) || break; "
+      + "printf '===%s===\\n' \"$f\"; head -c \"$maxBytes\" -- \"$f\"; printf '\\n=== EOM ===\\n'; "
+      + "done < <(find \"$dir\" -maxdepth 1 -type f -name '*.json' -size -$(( maxBytes / 1024 + 1 ))k -print0 | sort -z)"
+    syncScanProcess.command = ["bash", "-c", script, root.syncEffectiveDir, String(syncMaxFiles), String(syncMaxFileBytes)]
     syncScanProcess.running = true
   }
 
@@ -543,8 +569,20 @@ Item {
   }
 
   function combineObjectNumbers(additive, target, source) {
-    if (!source) return
-    for (var key in source) target[key] = combineNumber(additive, target[key], source[key])
+    var keys = plainKeys(source, syncMaxModels)
+    for (var i = 0; i < keys.length; i++)
+      target[keys[i]] = combineNumber(additive, target[keys[i]], source[keys[i]])
+  }
+
+  // The first max keys of a plain object; anything else (arrays, strings,
+  // numbers) has none.
+  function plainKeys(value, max) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return []
+    return Object.keys(value).slice(0, max)
+  }
+
+  function plainArray(value, max) {
+    return Array.isArray(value) ? value.slice(0, max) : []
   }
 
   function aggregateSnapshots(snapshots) {
@@ -581,9 +619,12 @@ Item {
       var snapshot = snapshots[i]
       var device = safeDeviceId(snapshot.deviceId || "device")
       devices[device] = true
-      var snapshotProviders = snapshot.providers || {}
-      for (var providerId in snapshotProviders) {
-        var stats = snapshotProviders[providerId] || {}
+      var snapshotProviders = snapshot.providers
+      var providerIds = plainKeys(snapshotProviders, syncMaxProviders)
+      for (var pi = 0; pi < providerIds.length; pi++) {
+        var providerId = providerIds[pi]
+        var stats = snapshotProviders[providerId]
+        if (!stats || typeof stats !== "object") continue
         var acc = providerAcc(String(providerId))
         acc.devices[device] = true
         if (stats.providerName && acc.providerName === "") acc.providerName = String(stats.providerName)
@@ -601,12 +642,12 @@ Item {
         // Active days overlap between machines, so union the dates rather than
         // summing counts. Snapshots written before activeDates existed only
         // carry a count; the widest one stands in for them.
-        var activeDates = Array.isArray(stats.activeDates) ? stats.activeDates : []
+        var activeDates = plainArray(stats.activeDates, syncMaxDates)
         for (var ad = 0; ad < activeDates.length; ad++) acc.activeDates[String(activeDates[ad])] = true
         acc.activeDays = Math.max(acc.activeDays, numberValue(stats.activeDays))
         combineObjectNumbers(additive, acc.todayTokensByModel, stats.todayTokensByModel || {})
 
-        var recent = Array.isArray(stats.recentDays) ? stats.recentDays : []
+        var recent = plainArray(stats.recentDays, syncMaxRecentDays)
         for (var r = 0; r < recent.length; r++) {
           var day = recent[r] || {}
           var date = String(day.date || "")
@@ -614,11 +655,18 @@ Item {
             acc.recentByDay[date] = combineNumber(additive, acc.recentByDay[date], day.messageCount)
         }
 
-        var usage = stats.modelUsage || {}
-        for (var modelId in usage) {
+        var usage = stats.modelUsage
+        var modelIds = plainKeys(usage, syncMaxModels)
+        for (var mi = 0; mi < modelIds.length; mi++) {
+          var modelId = modelIds[mi]
+          // Across devices the merged list is capped too: a model no one has
+          // seen yet is only added while there is room.
           var bucket = acc.modelUsage[modelId]
-          if (!bucket) bucket = acc.modelUsage[modelId] = emptyTokenBucket()
-          combineObjectNumbers(additive, bucket, usage[modelId] || {})
+          if (!bucket) {
+            if (Object.keys(acc.modelUsage).length >= syncMaxModels) continue
+            bucket = acc.modelUsage[modelId] = emptyTokenBucket()
+          }
+          combineObjectNumbers(additive, bucket, usage[modelId])
         }
       }
     }

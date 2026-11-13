@@ -226,6 +226,19 @@ into the Claude record in `~/.local/state/omarchy/agents/usage/`. The widget rea
 If a reset jumps by more than an hour, the widget treats it as a new week
 and drops the old days. A free early refill (Settings > Usage) lowers the
 percentage but leaves the reset time alone, so it counts as unused budget.
+
+A plan change (Pro to Max, or back) also keeps the reset time, but puts the
+percentage on the new plan's scale, usually back near zero. Counted as a
+refill, that would hand today every earlier day's share at once. So when the
+plan in the panel's header changes and stays changed for two refreshes, the
+week restarts that day: earlier days are dropped, and what the new plan has
+left is split evenly over the days that remain (days off still count). The
+restart is kept in `budget.json` and cleared at the next weekly reset.
+
+Right after an upgrade, Claude Code's login file still names the old
+subscription until the next `/login`, while its profile already has the new
+tier, so Omarchy's collector reports "Pro 5x". Only Max has a multiplier, so
+the widget shows a Pro or Free plan with one as Max.
 A window the server does not send is left out: without a 5h limit the 5h
 half of the pill shows "—". A missing reset time reads "Reset time
 unknown" and never counts down.
@@ -250,6 +263,12 @@ omarchy bar set io.github.tonciz.agents-budget refreshIntervalSec 30 --json
 | `syncFileName` | `<hostname>.json` | This machine's snapshot file |
 | `syncDeviceId` | hostname | Stable device name inside the snapshot |
 
+With sync on, anyone who can write to `syncDir` decides what the shell reads,
+so the merge is bounded: only regular `*.json` files (no symlinks or
+devices), at most 16 of them, each skipped above 128 KiB, and within a file
+at most 32 agents, 64 models, 1000 active dates and 31 recent days. A real
+snapshot is a few KB. Anything past a limit is ignored, never an error.
+
 ## Interactions
 
 - Bar: left click opens the panel, right click launches your default agent
@@ -263,8 +282,9 @@ omarchy bar set io.github.tonciz.agents-budget refreshIntervalSec 30 --json
 ## How it works, and what can break
 
 This is a clone of Omarchy's first-party `omarchy.agents` plugin
-(`omarchy plugin clone`). `Main.qml` and `Agent.qml` are unchanged from
-Omarchy 4.0.6; the bar pill, colors and budget are all in `Panel.qml`. The
+(`omarchy plugin clone`). `Agent.qml` is unchanged from Omarchy 4.0.6.
+`Main.qml` differs only in the bounded sync merge and the plan label fix
+(both above); the bar pill, colors and budget are all in `Panel.qml`. The
 data comes from Omarchy's own collectors (`omarchy-agent-usage-update` and
 the per-agent `omarchy-agent-usage-*` scripts), which write one JSON record
 per agent to `~/.local/state/omarchy/agents/usage/`.

@@ -263,8 +263,30 @@ Panel {
     for (var wk = 0; wk < 7; wk++) weekKeys.push(budgetKey(bounds, wk))
     var off = (budgetState.off || []).filter(function(k) { return weekKeys.indexOf(k) >= 0 })
     var key = budgetKey(bounds, index)
+    // A plan change (Pro to Max, or back) keeps the weekly reset but puts the
+    // percent on a new scale, often back near zero. Read as a refill it would
+    // hand today every earlier day's share at once. Instead the week restarts
+    // today: earlier days are dropped and what is left of the week is split
+    // over the days that remain. The first plan ever seen is only recorded.
+    // A new plan has to show on two refreshes in a row, so a profile that
+    // could not be read for a moment does not restart the week.
+    var storedPlan = String(budgetState.plan || "")
+    var pending = String(budgetState.planNext || "")
+    var plan = root.budgetPlan || storedPlan
+    var rebase = fresh ? null : (budgetState.rebase || null)
+    var changed = !fresh && storedPlan !== "" && plan !== storedPlan
+    var switched = changed && pending === plan
+    var planNext = changed && !switched ? plan : ""
+    if (changed && !switched) plan = storedPlan
+    if (switched) {
+      days = {}
+      rebase = { key: key, start: w.percent }
+      off = off.filter(function(k) { return k >= key })
+    }
     var day = days[key]
-    if (!day) {
+    if (switched) {
+      day = { start: w.percent, last: w.percent }
+    } else if (!day) {
       // Today starts where the last recorded day left off, or at zero on the
       // week's first day.
       var previous = ""
@@ -272,15 +294,38 @@ Panel {
         if (k2 < key && k2 > previous) previous = k2
       var start = previous !== "" ? days[previous].last : (index === 0 ? 0 : w.percent)
       day = { start: Math.min(start, w.percent), last: w.percent }
-    } else if (!fresh && day.last === w.percent && off.length === (budgetState.off || []).length) {
+    } else if (!fresh && day.last === w.percent && off.length === (budgetState.off || []).length
+               && plan === storedPlan && planNext === pending) {
       return
     } else {
       day = { start: Math.min(day.start, w.percent), last: w.percent }
     }
     days[key] = day
-    budgetState = { reset: w.resetAt, days: days, off: off }
+    budgetState = budgetStateWith({ reset: w.resetAt, days: days, off: off, plan: plan, rebase: rebase,
+                                    planNext: planNext })
     budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
   }
+
+  // budget.json without empty keys, so a week with no plan change looks the
+  // way it always did.
+  function budgetStateWith(s) {
+    var out = { reset: s.reset, days: s.days || {}, off: s.off || [] }
+    if (s.plan) out.plan = s.plan
+    if (s.rebase) out.rebase = s.rebase
+    if (s.planNext) out.planNext = s.planNext
+    return out
+  }
+
+  // The plan the weekly window belongs to, from the Claude record. Every
+  // refresh rebuilds the record, which is the second look a new plan needs.
+  readonly property string budgetPlan: claudeProvider ? String(claudeProvider.tierLabel || "") : ""
+  onClaudeProviderChanged: recordBudget()
+
+  // A week restarted by a plan change counts from that day's start key and
+  // percent. Days before it get no share; the cap starts at the percent the
+  // new plan opened with.
+  readonly property var budgetRebase: budgetState.rebase || null
+  function budgetBeforeRebase(key) { return !!budgetRebase && key < budgetRebase.key }
 
   // Days off: right click a day in the graph (today or later) to give it
   // nothing, and its seventh is split evenly over the other days. Kept as
@@ -292,28 +337,49 @@ Panel {
     var off = (budgetState.off || []).slice()
     var at = off.indexOf(row.key)
     if (at >= 0) off.splice(at, 1)
-    else if (off.length < 6) off.push(row.key)  // at least one day keeps the week
+    else if (budgetOnDays() > 1) off.push(row.key)  // at least one day keeps the week
     else return
-    budgetState = { reset: budgetState.reset, days: budgetState.days || {}, off: off }
+    budgetState = budgetStateWith({ reset: budgetState.reset, days: budgetState.days, off: off,
+                                    plan: budgetState.plan, rebase: budgetState.rebase,
+                                    planNext: budgetState.planNext })
     budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
   }
 
   // Each day that is not off gets an equal share of the week (a seventh with
   // no days off), and whatever is not used carries forward in full: by the end
   // of day i (0-based) up to the shares of days 0..i may be used.
+  // After a plan change only the days from the restart on share what the new
+  // plan has left (1 - its opening percent).
   function budgetShares(bounds) {
     var on = []
+    var live = []
     var count = 0
     for (var i = 0; i < 7; i++) {
-      on.push(!isDayOff(budgetKey(bounds, i)))
+      var k = budgetKey(bounds, i)
+      live.push(!budgetBeforeRebase(k))
+      on.push(live[i] && !isDayOff(k))
       if (on[i]) count++
     }
-    if (count === 0) { on = [true, true, true, true, true, true, true]; count = 7 }
-    return on.map(function(x) { return x ? 1 / count : 0 })
+    if (count === 0) { on = live; count = live.filter(function(x) { return x }).length }
+    var pool = 1 - (budgetRebase ? budgetRebase.start : 0)
+    return on.map(function(x) { return x ? pool / count : 0 })
+  }
+
+  // Days that still get a share, for the "keep at least one" rule on days off.
+  function budgetOnDays() {
+    var w = root.weeklyWindow
+    if (!w || w.resetAt === "") return 0
+    var bounds = budgetBounds(new Date(w.resetAt).getTime())
+    var n = 0
+    for (var i = 0; i < 7; i++) {
+      var k = budgetKey(bounds, i)
+      if (!budgetBeforeRebase(k) && !isDayOff(k)) n++
+    }
+    return n
   }
 
   function budgetCapFrom(shares, index) {
-    var sum = 0
+    var sum = budgetRebase ? budgetRebase.start : 0
     for (var i = 0; i <= index && i < shares.length; i++) sum += shares[i]
     return index >= 6 ? 1 : Math.min(1, sum)
   }
