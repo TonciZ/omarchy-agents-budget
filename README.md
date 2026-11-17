@@ -14,8 +14,14 @@ The Omarchy **Agents** bar widget with two additions for Claude Code users:
   daily allowance, so you can pace a week of work instead of finding out on
   day five that it is gone. Mark days off and their share goes to the rest.
 
-Everything else is the stock Agents panel: limits, tokens by day, tokens by
-model, Codex and Fireworks tabs, cross-machine sync.
+Everything else is the Agents panel as Omarchy 4.0.6 shipped it: limits,
+tokens by day, tokens by model, cross-machine sync, and one tab for each agent
+that has usage on your machine (Claude Code, Codex, OpenCode, local models and
+so on).
+
+Omarchy's own Agents widget has changed since then. In Omarchy 4.5 it opens as
+a short summary with the session and weekly bars. This plugin keeps the full
+panel in one view. See [Before and after](#before-and-after).
 
 ## Before and after
 
@@ -38,7 +44,7 @@ the stock themes.
 
 ## Install
 
-Requires Omarchy 4 (tested on 4.0.6) and a signed-in Claude Code CLI.
+Requires Omarchy 4 (tested on 4.0.6 and 4.5.0) and a signed-in Claude Code CLI.
 
 ```bash
 omarchy plugin add https://github.com/TonciZ/omarchy-agents-budget.git --enable
