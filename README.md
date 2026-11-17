@@ -17,6 +17,25 @@ The Omarchy **Agents** bar widget with two additions for Claude Code users:
 Everything else is the stock Agents panel: limits, tokens by day, tokens by
 model, Codex and Fireworks tabs, cross-machine sync.
 
+## Before and after
+
+Both in Tokyo Night, the default Omarchy theme. On the left is the stock
+Agents widget of Omarchy 4.5. On the right is Agents Budget with the battery
+view in the bar.
+
+| Before: stock Agents | After: Agents Budget |
+|---|---|
+| <img src="screenshots/before-stock-agents.png" width="330" alt="The stock Omarchy Agents widget: an icon in the bar and a small panel with session and weekly usage"> | <img src="screenshots/theme-tokyo-night.png" width="330" alt="Agents Budget: a usage pill in the bar and a panel with the daily budget, limits and tokens by day and by model"> |
+
+## Themes
+
+The widget takes its colors from your Omarchy theme. Here it is in three of
+the stock themes.
+
+| Tokyo Night | Catppuccin Latte | Gruvbox |
+|---|---|---|
+| <img src="screenshots/theme-tokyo-night.png" width="270" alt="Agents Budget in the Tokyo Night theme"> | <img src="screenshots/theme-catppuccin-latte.png" width="270" alt="Agents Budget in the Catppuccin Latte theme"> | <img src="screenshots/theme-gruvbox.png" width="270" alt="Agents Budget in the Gruvbox theme"> |
+
 ## Install
 
 Requires Omarchy 4 (tested on 4.0.6) and a signed-in Claude Code CLI.
