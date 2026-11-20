@@ -60,7 +60,7 @@ Panel {
   // last 10% of the funded credits lights the same alarm.
   readonly property bool balanceAlarming: !!balance && balance.funded > 0
     && balance.remaining / balance.funded <= 0.1
-  readonly property bool alarming: limits.some(function(w) { return limitLevel(w) === 2 }) || balanceAlarming
+  readonly property bool alarming: limits.some(function(w) { return !isModelScoped(w) && limitLevel(w) === 2 }) || balanceAlarming
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
   function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
@@ -139,15 +139,39 @@ Panel {
     return out
   }
 
+  // A model-scoped window ("Fable Weekly") is a slice of the account's
+  // weekly limit, not a pool of its own: on Max, Fable may use up to half of
+  // the week. Filling it only means "switch model", so it never alarms or
+  // counts as the binding limit. It shows as a hint instead (2026-11-20).
+  function isModelScoped(w) {
+    if (!w) return false
+    var t = w.title
+    return t !== "Session" && t !== "Weekly" && t !== "Monthly" && t !== "Limit"
+  }
+
   // The window that decides how much room is left — the fullest one, since
-  // that is what stops the next prompt.
+  // that is what stops the next prompt. Model-scoped windows only count when
+  // there is nothing else.
   function bindingWindow(p) {
     var windows = limitWindows(p)
     var best = null
-    for (var i = 0; i < windows.length; i++) {
-      if (!best || windows[i].percent > best.percent) best = windows[i]
+    for (var pass = 0; pass < 2 && !best; pass++) {
+      for (var i = 0; i < windows.length; i++) {
+        if (pass === 0 && isModelScoped(windows[i])) continue
+        if (!best || windows[i].percent > best.percent) best = windows[i]
+      }
     }
     return best
+  }
+
+  // Model-scoped windows of the selected provider at the warning level or
+  // above: named under "Closest to limit" with the reset time.
+  function cappedScoped(p) {
+    return limitWindows(p).filter(function(w) { return isModelScoped(w) && limitLevel(w) >= 1 })
+  }
+
+  function scopedName(w) {
+    return String(w.title).replace(/\s+(Weekly|Monthly|Session)$/, "")
   }
 
   // Session windows run out fast, so they warn earlier than weekly ones:
@@ -174,31 +198,52 @@ Panel {
   // the weekly window's resetAt on every refresh. The weekly figure at each
   // day's start lives in budget.json so the graph can show what each day used.
 
-  readonly property string budgetPath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/agents/budget.json"
-  property var budgetState: ({ reset: "", days: {}, off: [] })
-  property bool budgetLoaded: false
+  readonly property string budgetDir: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/agents/"
+
+  // The plan the weekly window belongs to, from the Claude record. Every
+  // refresh rebuilds the record, which is the second look a new plan needs.
+  readonly property string budgetPlan: claudeProvider ? String(claudeProvider.tierLabel || "") : ""
+  onClaudeProviderChanged: {
+    budgetAll.recordBudget()
+    budgetScoped.recordBudget()
+    claudeSettings.reload()
+  }
+
+  BudgetTrack {
+    id: budgetAll
+    source: root.weeklyWindow
+    path: root.budgetDir + "budget.json"
+  }
+
+  BudgetTrack {
+    id: budgetScoped
+    source: root.scopedWindow
+    path: root.scopedSlug !== "" ? root.budgetDir + "budget-" + root.scopedSlug + ".json" : ""
+  }
+
+  // Claude Code's default model ("model" in settings.json, which /model also
+  // writes). A session started with --model is not visible here.
+  readonly property string claudeSettingsPath: (Quickshell.env("CLAUDE_CONFIG_DIR") || Quickshell.env("HOME") + "/.claude") + "/settings.json"
+  property string defaultModel: ""
 
   FileView {
-    id: budgetFile
-    path: root.budgetPath
-    watchChanges: false
-    atomicWrites: true
+    id: claudeSettings
+    path: root.claudeSettingsPath
+    watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
-      try {
-        var parsed = JSON.parse(text())
-        if (parsed && parsed.days) root.budgetState = parsed
-      } catch (e) {}
-      root.budgetLoaded = true
-      root.recordBudget()
-    }
-    onLoadFailed: {
-      root.budgetLoaded = true
-      root.recordBudget()
+      try { root.defaultModel = String(JSON.parse(text()).model || "") } catch (e) {}
     }
   }
 
-  onWeeklyWindowChanged: recordBudget()
+  // The default model draws from the scoped window (model "fable",
+  // "claude-fable-5-2", ...): that budget leads. Anything else: all models.
+  readonly property bool useScoped: !!scopedWindow && scopedSlug !== ""
+    && defaultModel.toLowerCase().indexOf(scopedSlug) >= 0
+  readonly property var activeTrack: useScoped ? budgetScoped : budgetAll
+  readonly property var activeWeekly: useScoped ? scopedWindow : weeklyWindow
+  readonly property var budgetToday: activeTrack.budgetToday
 
   function dateKey(ms) {
     var d = new Date(ms)
@@ -238,203 +283,6 @@ Panel {
     var late = reset.getHours() * 60 + reset.getMinutes() >= 12 * 60
     var back = (late ? 0 : 1) + 6 - index
     return dateKey(new Date(reset.getFullYear(), reset.getMonth(), reset.getDate() - back, 12).getTime())
-  }
-
-  function recordBudget() {
-    var w = root.weeklyWindow
-    if (!budgetLoaded || !w || w.resetAt === "") return
-    var reset = new Date(w.resetAt).getTime()
-    if (!isFinite(reset)) return
-    var bounds = budgetBounds(reset)
-    var index = budgetIndex(bounds, root.nowMs)
-    // The reset time wobbles a little between fetches; a jump of more than
-    // an hour is a new window, and the old days no longer count. A refill
-    // that leaves the reset where it is only lowers the percent, which the
-    // Math.min below takes as today's new start.
-    var fresh = !budgetState.reset || Math.abs(new Date(budgetState.reset).getTime() - reset) > 3600000
-    var days = {}
-    if (!fresh) {
-      for (var i = 0; i < 7; i++) {
-        var k = budgetKey(bounds, i)
-        if (budgetState.days[k]) days[k] = budgetState.days[k]
-      }
-    }
-    var weekKeys = []
-    for (var wk = 0; wk < 7; wk++) weekKeys.push(budgetKey(bounds, wk))
-    var off = (budgetState.off || []).filter(function(k) { return weekKeys.indexOf(k) >= 0 })
-    var key = budgetKey(bounds, index)
-    // A plan change (Pro to Max, or back) keeps the weekly reset but puts the
-    // percent on a new scale, often back near zero. Read as a refill it would
-    // hand today every earlier day's share at once. Instead the week restarts
-    // today: earlier days are dropped and what is left of the week is split
-    // over the days that remain. The first plan ever seen is only recorded.
-    // A new plan has to show on two refreshes in a row, so a profile that
-    // could not be read for a moment does not restart the week.
-    var storedPlan = String(budgetState.plan || "")
-    var pending = String(budgetState.planNext || "")
-    var plan = root.budgetPlan || storedPlan
-    var rebase = fresh ? null : (budgetState.rebase || null)
-    var changed = !fresh && storedPlan !== "" && plan !== storedPlan
-    var switched = changed && pending === plan
-    var planNext = changed && !switched ? plan : ""
-    if (changed && !switched) plan = storedPlan
-    if (switched) {
-      days = {}
-      rebase = { key: key, start: w.percent }
-      off = off.filter(function(k) { return k >= key })
-    }
-    var day = days[key]
-    if (switched) {
-      day = { start: w.percent, last: w.percent }
-    } else if (!day) {
-      // Today starts where the last recorded day left off, or at zero on the
-      // week's first day.
-      var previous = ""
-      for (var k2 in days)
-        if (k2 < key && k2 > previous) previous = k2
-      var start = previous !== "" ? days[previous].last : (index === 0 ? 0 : w.percent)
-      day = { start: Math.min(start, w.percent), last: w.percent }
-    } else if (!fresh && day.last === w.percent && off.length === (budgetState.off || []).length
-               && plan === storedPlan && planNext === pending) {
-      return
-    } else {
-      day = { start: Math.min(day.start, w.percent), last: w.percent }
-    }
-    days[key] = day
-    budgetState = budgetStateWith({ reset: w.resetAt, days: days, off: off, plan: plan, rebase: rebase,
-                                    planNext: planNext })
-    budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
-  }
-
-  // budget.json without empty keys, so a week with no plan change looks the
-  // way it always did.
-  function budgetStateWith(s) {
-    var out = { reset: s.reset, days: s.days || {}, off: s.off || [] }
-    if (s.plan) out.plan = s.plan
-    if (s.rebase) out.rebase = s.rebase
-    if (s.planNext) out.planNext = s.planNext
-    return out
-  }
-
-  // The plan the weekly window belongs to, from the Claude record. Every
-  // refresh rebuilds the record, which is the second look a new plan needs.
-  readonly property string budgetPlan: claudeProvider ? String(claudeProvider.tierLabel || "") : ""
-  onClaudeProviderChanged: recordBudget()
-
-  // A week restarted by a plan change counts from that day's start key and
-  // percent. Days before it get no share; the cap starts at the percent the
-  // new plan opened with.
-  readonly property var budgetRebase: budgetState.rebase || null
-  function budgetBeforeRebase(key) { return !!budgetRebase && key < budgetRebase.key }
-
-  // Days off: right click a day in the graph (today or later) to give it
-  // nothing, and its seventh is split evenly over the other days. Kept as
-  // date keys in budget.json and dropped once the week is over.
-  function isDayOff(key) { return (budgetState.off || []).indexOf(key) >= 0 }
-
-  function toggleDayOff(row) {
-    if (!row || (!row.today && !row.future)) return
-    var off = (budgetState.off || []).slice()
-    var at = off.indexOf(row.key)
-    if (at >= 0) off.splice(at, 1)
-    else if (budgetOnDays() > 1) off.push(row.key)  // at least one day keeps the week
-    else return
-    budgetState = budgetStateWith({ reset: budgetState.reset, days: budgetState.days, off: off,
-                                    plan: budgetState.plan, rebase: budgetState.rebase,
-                                    planNext: budgetState.planNext })
-    budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
-  }
-
-  // Each day that is not off gets an equal share of the week (a seventh with
-  // no days off), and whatever is not used carries forward in full: by the end
-  // of day i (0-based) up to the shares of days 0..i may be used.
-  // After a plan change only the days from the restart on share what the new
-  // plan has left (1 - its opening percent).
-  function budgetShares(bounds) {
-    var on = []
-    var live = []
-    var count = 0
-    for (var i = 0; i < 7; i++) {
-      var k = budgetKey(bounds, i)
-      live.push(!budgetBeforeRebase(k))
-      on.push(live[i] && !isDayOff(k))
-      if (on[i]) count++
-    }
-    if (count === 0) { on = live; count = live.filter(function(x) { return x }).length }
-    var pool = 1 - (budgetRebase ? budgetRebase.start : 0)
-    return on.map(function(x) { return x ? pool / count : 0 })
-  }
-
-  // Days that still get a share, for the "keep at least one" rule on days off.
-  function budgetOnDays() {
-    var w = root.weeklyWindow
-    if (!w || w.resetAt === "") return 0
-    var bounds = budgetBounds(new Date(w.resetAt).getTime())
-    var n = 0
-    for (var i = 0; i < 7; i++) {
-      var k = budgetKey(bounds, i)
-      if (!budgetBeforeRebase(k) && !isDayOff(k)) n++
-    }
-    return n
-  }
-
-  function budgetCapFrom(shares, index) {
-    var sum = budgetRebase ? budgetRebase.start : 0
-    for (var i = 0; i <= index && i < shares.length; i++) sum += shares[i]
-    return index >= 6 ? 1 : Math.min(1, sum)
-  }
-
-  readonly property var budgetDays: {
-    var w = root.weeklyWindow
-    if (!w || w.resetAt === "") return []
-    var reset = new Date(w.resetAt).getTime()
-    if (!isFinite(reset)) return []
-    var bounds = budgetBounds(reset)
-    var stored = budgetState.days || {}
-    var todayIndex = budgetIndex(bounds, root.nowMs)
-    var shares = budgetShares(bounds)
-    function budgetCap(i) { return budgetCapFrom(shares, i) }
-    var out = []
-    for (var index = 0; index < 7; index++) {
-      var key = budgetKey(bounds, index)
-      var cap = budgetCap(index)
-      var row = { key: key, label: dayName(key), today: index === todayIndex, future: index > todayIndex,
-                  cap: cap, budget: -1, used: -1, over: false, endMs: bounds[index + 1],
-                  balance: 0, hasBalance: false, carried: 0, share: shares[index], off: isDayOff(key) }
-      var entry = stored[key]
-      if (row.future) {
-        // What the day has if every day before it ends exactly on budget.
-        row.budget = cap - (index > 0 ? budgetCap(index - 1) : 0)
-      } else if (row.today) {
-        var start = entry ? entry.start : w.percent
-        row.budget = cap - start
-        row.used = w.percent - start
-        row.over = w.percent > cap
-        row.total = w.percent
-        // Saved (+) or owed (-) from earlier days, and where today ends if
-        // nothing more is used.
-        row.carried = (index > 0 ? budgetCap(index - 1) : 0) - start
-        row.balance = cap - w.percent
-        row.hasBalance = true
-      } else if (entry) {
-        // A past day is measured against its own share, line and color
-        // alike. The carry-over decides what is left today, not how earlier
-        // days look.
-        row.budget = shares[index]
-        row.used = Math.max(0, entry.last - entry.start)
-        row.over = row.used > shares[index] + 0.0005
-        row.balance = cap - entry.last
-        row.hasBalance = true
-      }
-      out.push(row)
-    }
-    return out
-  }
-
-  readonly property var budgetToday: {
-    for (var i = 0; i < budgetDays.length; i++)
-      if (budgetDays[i].today) return budgetDays[i]
-    return null
   }
 
   function budgetPercent(fraction) {
@@ -625,15 +473,6 @@ Panel {
     settings: root.settings
   }
 
-  // Cheap enough to keep running: it only re-evaluates text bindings, and a
-  // stale "resets in 2h" on a panel that is open is worse than a timer.
-  Timer {
-    interval: 30000
-    running: root.opened
-    repeat: true
-    onTriggered: root.nowMs = Date.now()
-  }
-
   IpcHandler {
     target: root.ipcTarget
     function open(): void { root.open() }
@@ -666,7 +505,14 @@ Panel {
 
   readonly property var sessionWindow: glanceWindow("Session")
   readonly property var weeklyWindow: glanceWindow("Weekly")
-  readonly property bool showGlance: !button.vertical && (!!sessionWindow || !!weeklyWindow)
+  // Claude's model-scoped window (Fable Weekly), if the account has one.
+  readonly property var scopedWindow: {
+    for (var i = 0; i < claudeLimits.length; i++)
+      if (isModelScoped(claudeLimits[i])) return claudeLimits[i]
+    return null
+  }
+  readonly property string scopedSlug: scopedWindow ? scopedName(scopedWindow).toLowerCase() : ""
+  readonly property bool showGlance: !button.vertical && (!!sessionWindow || !!activeWeekly)
 
   // Two remembered switches in the budget section (middle click flips the
   // first): the pill shows what is left today as one battery instead of the
@@ -769,10 +615,12 @@ Panel {
   readonly property color stripColor: stripLevel === 2 ? urgent : stripLevel === 1 ? warning : button.foreground
 
   // A window that resets while nothing refreshes should read 0%, not its
-  // stale figure, so the clock ticks whenever the bar shows meters.
+  // stale figure, so the clock ticks whenever the bar shows meters
+  // or the panel is open. Cheap: it only re-evaluates text bindings, and a
+  // stale "resets in 2h" on an open panel is worse than a timer.
   Timer {
     interval: 30000
-    running: root.showGlance && !root.opened
+    running: root.opened || root.showGlance
     repeat: true
     onTriggered: root.nowMs = Date.now()
   }
@@ -824,7 +672,7 @@ Panel {
           height: 1
           color: root.barBackground
         }
-        PillHalf { window: root.weeklyWindow; label: "week" }
+        PillHalf { window: root.activeWeekly; label: root.useScoped ? root.scopedSlug : "week" }
       }
 
       // The battery: full at the start of the day, emptying from the left
@@ -835,7 +683,7 @@ Panel {
         width: parent.width
         height: parent.height - (root.showSessionStrip ? sessionStrip.height + 1 : 0)
         visible: root.showBattery
-        readonly property string label: root.batteryOver ? "over " + root.batteryText : root.batteryText
+        readonly property string label: root.batteryOver ? "+" + root.batteryText : root.batteryText
 
         Rectangle {
           anchors.fill: parent
@@ -960,12 +808,242 @@ Panel {
 
   // Half of the glance pill: track, fill, and the text drawn twice, the
   // second copy in the bar background and clipped to the fill.
+  // ---------------------------------------------------------------- budget track
+  //
+  // One running daily budget against one weekly window, kept in its own file.
+  // Two run side by side: all models (budget.json) and the model-scoped window
+  // such as Fable (budget-fable.json). The default model picks which one the
+  // panel and the pill show (2026-11-20).
+  component BudgetTrack: Item {
+    id: track
+    property var source: null
+    property string path: ""
+
+    property var budgetState: ({ reset: "", days: {}, off: [] })
+    property bool budgetLoaded: false
+
+    FileView {
+      id: budgetFile
+      path: track.path
+      watchChanges: false
+      atomicWrites: true
+      printErrors: false
+      onLoaded: {
+        try {
+          var parsed = JSON.parse(text())
+          if (parsed && parsed.days) track.budgetState = parsed
+        } catch (e) {}
+        track.budgetLoaded = true
+        track.recordBudget()
+      }
+      onLoadFailed: {
+        track.budgetLoaded = true
+        track.recordBudget()
+      }
+    }
+
+    onSourceChanged: recordBudget()
+
+    function recordBudget() {
+      var w = track.source
+      if (!budgetLoaded || !w || w.resetAt === "") return
+      var reset = new Date(w.resetAt).getTime()
+      if (!isFinite(reset)) return
+      var bounds = root.budgetBounds(reset)
+      var index = root.budgetIndex(bounds, root.nowMs)
+      // The reset time wobbles a little between fetches; a jump of more than
+      // an hour is a new window, and the old days no longer count. A refill
+      // that leaves the reset where it is only lowers the percent, which the
+      // Math.min below takes as today's new start.
+      var fresh = !budgetState.reset || Math.abs(new Date(budgetState.reset).getTime() - reset) > 3600000
+      var days = {}
+      if (!fresh) {
+        for (var i = 0; i < 7; i++) {
+          var k = root.budgetKey(bounds, i)
+          if (budgetState.days[k]) days[k] = budgetState.days[k]
+        }
+      }
+      var weekKeys = []
+      for (var wk = 0; wk < 7; wk++) weekKeys.push(root.budgetKey(bounds, wk))
+      var off = (budgetState.off || []).filter(function(k) { return weekKeys.indexOf(k) >= 0 })
+      var key = root.budgetKey(bounds, index)
+      // A plan change (Pro to Max, or back) keeps the weekly reset but puts the
+      // percent on a new scale, often back near zero. Read as a refill it would
+      // hand today every earlier day's share at once. Instead the week restarts
+      // today: earlier days are dropped and what is left of the week is split
+      // over the days that remain. The first plan ever seen is only recorded.
+      // A new plan has to show on two refreshes in a row, so a profile that
+      // could not be read for a moment does not restart the week.
+      var storedPlan = String(budgetState.plan || "")
+      var pending = String(budgetState.planNext || "")
+      var plan = root.budgetPlan || storedPlan
+      var rebase = fresh ? null : (budgetState.rebase || null)
+      var changed = !fresh && storedPlan !== "" && plan !== storedPlan
+      var switched = changed && pending === plan
+      var planNext = changed && !switched ? plan : ""
+      if (changed && !switched) plan = storedPlan
+      if (switched) {
+        days = {}
+        rebase = { key: key, start: w.percent }
+        off = off.filter(function(k) { return k >= key })
+      }
+      var day = days[key]
+      if (switched) {
+        day = { start: w.percent, last: w.percent }
+      } else if (!day) {
+        // Today starts where the last recorded day left off, or at zero on the
+        // week's first day.
+        var previous = ""
+        for (var k2 in days)
+          if (k2 < key && k2 > previous) previous = k2
+        var start = previous !== "" ? days[previous].last : (index === 0 ? 0 : w.percent)
+        day = { start: Math.min(start, w.percent), last: w.percent }
+      } else if (!fresh && day.last === w.percent && off.length === (budgetState.off || []).length
+                 && plan === storedPlan && planNext === pending) {
+        return
+      } else {
+        day = { start: Math.min(day.start, w.percent), last: w.percent }
+      }
+      days[key] = day
+      budgetState = budgetStateWith({ reset: w.resetAt, days: days, off: off, plan: plan, rebase: rebase,
+                                      planNext: planNext })
+      budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
+    }
+
+    // budget.json without empty keys, so a week with no plan change looks the
+    // way it always did.
+    function budgetStateWith(s) {
+      var out = { reset: s.reset, days: s.days || {}, off: s.off || [] }
+      if (s.plan) out.plan = s.plan
+      if (s.rebase) out.rebase = s.rebase
+      if (s.planNext) out.planNext = s.planNext
+      return out
+    }
+
+
+    // A week restarted by a plan change counts from that day's start key and
+    // percent. Days before it get no share; the cap starts at the percent the
+    // new plan opened with.
+    readonly property var budgetRebase: budgetState.rebase || null
+    function budgetBeforeRebase(key) { return !!budgetRebase && key < budgetRebase.key }
+
+    // Days off: right click a day in the graph (today or later) to give it
+    // nothing, and its seventh is split evenly over the other days. Kept as
+    // date keys in budget.json and dropped once the week is over.
+    function isDayOff(key) { return (budgetState.off || []).indexOf(key) >= 0 }
+
+    function toggleDayOff(row) {
+      if (!row || (!row.today && !row.future)) return
+      var off = (budgetState.off || []).slice()
+      var at = off.indexOf(row.key)
+      if (at >= 0) off.splice(at, 1)
+      else if (budgetOnDays() > 1) off.push(row.key)  // at least one day keeps the week
+      else return
+      budgetState = budgetStateWith({ reset: budgetState.reset, days: budgetState.days, off: off,
+                                      plan: budgetState.plan, rebase: budgetState.rebase,
+                                      planNext: budgetState.planNext })
+      budgetFile.setText(JSON.stringify(budgetState, null, 2) + "\n")
+    }
+
+    // Each day that is not off gets an equal share of the week (a seventh with
+    // no days off), and whatever is not used carries forward in full: by the end
+    // of day i (0-based) up to the shares of days 0..i may be used.
+    // After a plan change only the days from the restart on share what the new
+    // plan has left (1 - its opening percent).
+    function budgetShares(bounds) {
+      var on = []
+      var live = []
+      var count = 0
+      for (var i = 0; i < 7; i++) {
+        var k = root.budgetKey(bounds, i)
+        live.push(!budgetBeforeRebase(k))
+        on.push(live[i] && !isDayOff(k))
+        if (on[i]) count++
+      }
+      if (count === 0) { on = live; count = live.filter(function(x) { return x }).length }
+      var pool = 1 - (budgetRebase ? budgetRebase.start : 0)
+      return on.map(function(x) { return x ? pool / count : 0 })
+    }
+
+    // Days that still get a share, for the "keep at least one" rule on days off.
+    function budgetOnDays() {
+      var w = track.source
+      if (!w || w.resetAt === "") return 0
+      var bounds = root.budgetBounds(new Date(w.resetAt).getTime())
+      var n = 0
+      for (var i = 0; i < 7; i++) {
+        var k = root.budgetKey(bounds, i)
+        if (!budgetBeforeRebase(k) && !isDayOff(k)) n++
+      }
+      return n
+    }
+
+    function budgetCapFrom(shares, index) {
+      var sum = budgetRebase ? budgetRebase.start : 0
+      for (var i = 0; i <= index && i < shares.length; i++) sum += shares[i]
+      return index >= 6 ? 1 : Math.min(1, sum)
+    }
+
+    readonly property var budgetDays: {
+      var w = track.source
+      if (!w || w.resetAt === "") return []
+      var reset = new Date(w.resetAt).getTime()
+      if (!isFinite(reset)) return []
+      var bounds = root.budgetBounds(reset)
+      var stored = budgetState.days || {}
+      var todayIndex = root.budgetIndex(bounds, root.nowMs)
+      var shares = budgetShares(bounds)
+      function budgetCap(i) { return budgetCapFrom(shares, i) }
+      var out = []
+      for (var index = 0; index < 7; index++) {
+        var key = root.budgetKey(bounds, index)
+        var cap = budgetCap(index)
+        var row = { key: key, label: root.dayName(key), today: index === todayIndex, future: index > todayIndex,
+                    cap: cap, budget: -1, used: -1, over: false, endMs: bounds[index + 1],
+                    balance: 0, hasBalance: false, carried: 0, share: shares[index], off: isDayOff(key) }
+        var entry = stored[key]
+        if (row.future) {
+          // What the day has if every day before it ends exactly on budget.
+          row.budget = cap - (index > 0 ? budgetCap(index - 1) : 0)
+        } else if (row.today) {
+          var start = entry ? entry.start : w.percent
+          row.budget = cap - start
+          row.used = w.percent - start
+          row.over = w.percent > cap
+          row.total = w.percent
+          // Saved (+) or owed (-) from earlier days, and where today ends if
+          // nothing more is used.
+          row.carried = (index > 0 ? budgetCap(index - 1) : 0) - start
+          row.balance = cap - w.percent
+          row.hasBalance = true
+        } else if (entry) {
+          // A past day is measured against its own share, line and color
+          // alike. The carry-over decides what is left today, not how earlier
+          // days look.
+          row.budget = shares[index]
+          row.used = Math.max(0, entry.last - entry.start)
+          row.over = row.used > shares[index] + 0.0005
+          row.balance = cap - entry.last
+          row.hasBalance = true
+        }
+        out.push(row)
+      }
+      return out
+    }
+
+    readonly property var budgetToday: {
+      for (var i = 0; i < budgetDays.length; i++)
+        if (budgetDays[i].today) return budgetDays[i]
+      return null
+    }
+  }
+
   component PillHalf: Item {
     id: half
     property var window: null
     property string label: ""
     readonly property real percent: window ? window.percent : 0
-    readonly property string percentText: window ? Math.round(window.percent * 100) + "%" : "—"
+    readonly property string percentText: (window ? Math.round(window.percent * 100) + "%" : "—")
 
     width: pill.width
     height: root.pillHalfHeight
@@ -1205,7 +1283,7 @@ Panel {
 
             PanelSectionHeader {
               width: parent.width
-              text: "DAILY BUDGET"
+              text: root.useScoped ? "DAILY BUDGET · " + root.scopedSlug.toUpperCase() : "DAILY BUDGET"
               foreground: root.foreground
               fontFamily: root.fontFamily
             }
@@ -1277,10 +1355,10 @@ Panel {
 
             BudgetGraph {
               width: parent.width
-              days: root.budgetDays
+              days: root.activeTrack.budgetDays
               balanceView: root.graphBalance
               onToggled: root.setGraphBalance(!root.graphBalance)
-              onDayOffToggled: function(row) { root.toggleDayOff(row) }
+              onDayOffToggled: function(row) { root.activeTrack.toggleDayOff(row) }
             }
 
             Item { width: 1; height: Style.space(2) }
@@ -1405,6 +1483,25 @@ Panel {
               color: root.limitColor(closest, root.dim)
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
+            }
+
+            // A model-scoped window near its cap: not a stop, just switch model.
+            Repeater {
+              model: root.cappedScoped(root.provider)
+
+              Text {
+                required property var modelData
+                textFormat: Text.PlainText
+                width: limitsSection.width
+                wrapMode: Text.WordWrap
+                readonly property real resetMs: root.resetMsFor(modelData)
+                text: root.scopedName(modelData) + " " + (modelData.percent >= 0.995 ? "capped" : "nearly capped")
+                  + " (" + Math.round(modelData.percent * 100) + "%), switch model"
+                  + (resetMs > 0 ? " for " + root.formatDuration(resetMs) : "")
+                color: root.limitColor(modelData, root.dim)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
             }
 
             Repeater {

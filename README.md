@@ -93,7 +93,7 @@ phone battery, with the number in the middle.
 **Count today from 100** picks the number on it. Off, it is the actual weekly
 percent left for today (14% budget, half used: `7%`). On, today's budget is
 split into 100 parts and it counts down from `100` to `0` (same day: `50`).
-Past the budget it reads `over` in red. Both switches are kept in
+Past the budget it shows how far over in red, with a plus (`+15.1%`). Both switches are kept in
 `~/.local/state/omarchy/agents/view.json`.
 
 ### 5h momentum strip
@@ -227,6 +227,26 @@ which the widget records in
 `~/.local/state/omarchy/agents/budget.json` (honours `XDG_STATE_HOME`). A day
 the shell never ran on gets merged into the next day it does run. The budget
 is shown for Claude only.
+
+### Model-scoped limits (Fable)
+
+Besides the session and the week, Anthropic can send a limit for one model,
+such as **Fable Weekly**. On Max, Fable may use up to half of the weekly
+limit. It is a slice of the week, not a pool of its own, and filling it only
+means switching to another model. So it never turns the bar button red and
+is never named as "Closest to limit". It keeps its own row under LIMITS, and
+from 85% a yellow or red line there says "Fable capped (…%), switch model
+for …".
+
+The budget follows Claude Code's default model, the `model` in
+`~/.claude/settings.json` (`CLAUDE_CONFIG_DIR` is honoured; `/model` writes it
+too). When the default is Fable, the graph, the big number and the pill use
+the Fable limit: the header reads "DAILY BUDGET · FABLE" and the pill's lower
+half reads `fable`. With any other default they use the week as before. Both
+budgets are recorded all the time, the Fable one in `budget-fable.json` with
+its own days off, so switching shows a full week straight away. A session
+started with `--model` does not change the settings file, so the widget
+cannot see it.
 
 ### Where reset times come from
 
