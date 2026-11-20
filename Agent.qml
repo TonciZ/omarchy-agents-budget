@@ -14,6 +14,7 @@ Item {
   property var record: null
 
   FileView {
+    id: agentFile
     path: root.path
     watchChanges: true
     printErrors: false
@@ -21,6 +22,11 @@ Item {
     onLoaded: root.parse(text())
     onLoadFailed: root.record = null
   }
+
+  // The usage update rewrites records with an atomic mv, which replaces the
+  // inode. If inotify fails to rearm on the new one the FileView goes quiet,
+  // so Main.qml also reloads every record after each update run (stock #9974).
+  function reload() { agentFile.reload() }
 
   function parse(content) {
     try {

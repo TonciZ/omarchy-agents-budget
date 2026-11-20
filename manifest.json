@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tonciz.agents-budget",
   "name": "Agents Budget",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "author": "Tonči Žižić",
   "license": "MIT",
   "description": "The Omarchy Agents panel plus a Claude daily budget: a split 5h/week pill in the bar and a running daily allowance with carry-over in the panel.",
@@ -36,6 +36,7 @@
         }
       },
       "refreshIntervalSec": 60,
+      "fullRescanSec": 600,
       "syncMode": "Off",
       "syncDir": "",
       "syncFileName": "",
@@ -49,7 +50,18 @@
         "min": 30,
         "max": 3600,
         "step": 30,
-        "defaultValue": 60
+        "defaultValue": 60,
+        "description": "Light limits-only refresh that keeps the bar pill live. Below 60 s Anthropic may refuse the probes."
+      },
+      {
+        "key": "fullRescanSec",
+        "type": "integer",
+        "label": "Full rescan interval (seconds)",
+        "min": 60,
+        "max": 3600,
+        "step": 60,
+        "defaultValue": 600,
+        "description": "Full refresh that also rescans the local transcripts for the token tables."
       },
       {
         "key": "syncMode",

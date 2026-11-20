@@ -296,12 +296,13 @@ That JSON only goes to a statusline script while a session is running.
 Settings live in the widget's entry in `~/.config/omarchy/shell.json`:
 
 ```bash
-omarchy bar set io.github.tonciz.agents-budget refreshIntervalSec 30 --json
+omarchy bar set io.github.tonciz.agents-budget refreshIntervalSec 120 --json
 ```
 
 | Key | Default | What it does |
 |---|---|---|
-| `refreshIntervalSec` | `60` | How often the usage records regenerate (the stock widget uses 900) |
+| `refreshIntervalSec` | `60` | How often the limits refresh (a light `--limits-only` run that keeps the pill live). Below 60 s Anthropic may refuse the probes |
+| `fullRescanSec` | `600` | How often the full refresh runs, which also rescans the local transcripts for the token tables (the stock widget does everything every 900 s) |
 | `providers` | all enabled | `{"claude": {"enabled": true}, "codex": {...}, "fireworks": {...}}` |
 | `syncMode` | `"Off"` | `"On"` writes this machine's snapshot and merges the others |
 | `syncDir` | `""` | A folder synced by Syncthing, Dropbox, rsync, ... |
@@ -327,9 +328,12 @@ snapshot is a few KB. Anything past a limit is ignored, never an error.
 ## How it works, and what can break
 
 This is a clone of Omarchy's first-party `omarchy.agents` plugin
-(`omarchy plugin clone`). `Agent.qml` is unchanged from Omarchy 4.0.6.
-`Main.qml` differs only in the bounded sync merge and the plan label fix
-(both above); the bar pill, colors and budget are all in `Panel.qml`. The
+(`omarchy plugin clone`). `Agent.qml` adds only stock's reload fix
+(omarchy #9974): the usage update replaces each record with an atomic `mv`,
+which can leave a file watch dead, so `Main.qml` reloads every record after
+each update run. `Main.qml` otherwise differs in the two refresh timers
+(see Settings), the bounded sync merge and the plan label fix (both above);
+the bar pill, colors and budget are all in `Panel.qml`. The
 data comes from Omarchy's own collectors (`omarchy-agent-usage-update` and
 the per-agent `omarchy-agent-usage-*` scripts), which write one JSON record
 per agent to `~/.local/state/omarchy/agents/usage/`.

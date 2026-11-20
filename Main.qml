@@ -64,6 +64,14 @@ Item {
     onObjectRemoved: (index, object) => root.rebuildAgents()
   }
 
+  // Each record's FileView follows its file on its own; this catches the ones
+  // whose watch was lost when an update replaced the file underneath them
+  // (stock #9974, ported 2026-11-13).
+  function reloadRecords() {
+    for (var i = 0; i < agents.length; i++)
+      if (agents[i]) agents[i].reload()
+  }
+
   function rebuildAgents() {
     var result = []
     for (var i = 0; i < agentInstantiator.count; i++) {
@@ -114,11 +122,23 @@ Item {
 
   // -------------------------------------------------------------- refresh
 
-  property int refreshIntervalSec: Math.max(30, Number(setting("refreshIntervalSec", 900)))
+  // Two cadences: a light limits-only refresh that keeps the bar pill live
+  // (refreshIntervalSec, 60 s by default; Anthropic refuses probes more often than
+  // about every 3 min when they pile up, so do not go much lower), and a slow
+  // full transcript rescan (fullRescanSec, 10 min).
+  property int refreshIntervalSec: Math.max(30, Number(setting("refreshIntervalSec", 60)))
+  property int fullRescanSec: Math.max(60, Number(setting("fullRescanSec", 600)))
   property string pendingUpdateKind: ""
 
   Timer {
     interval: root.refreshIntervalSec * 1000
+    running: true
+    repeat: true
+    onTriggered: root.runUpdate("limits")
+  }
+
+  Timer {
+    interval: root.fullRescanSec * 1000
     running: true
     repeat: true
     triggeredOnStart: true
@@ -130,6 +150,7 @@ Item {
     running: false
     onExited: {
       root.rescanAgents()
+      root.reloadRecords()
       if (root.pendingUpdateKind !== "") {
         var kind = root.pendingUpdateKind
         root.pendingUpdateKind = ""
